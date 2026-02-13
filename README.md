@@ -26,3 +26,7 @@ git status
 git add -A
 git commit -m "Describe what you changed"
 git push
+
+
+# 
+python choose_sim.py

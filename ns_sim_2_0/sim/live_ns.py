@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 from typing import List
 import math
@@ -6,11 +5,13 @@ import math
 from evo_sim.sim.config import WORLD
 from evo_sim.sim.world import World
 from evo_sim.sim.models import Creature as EvoCreature, Species
-from .engine_ns import end_of_day_selection, _clamp_speed, _apply_energy, _apply_motion, _consume_food_if_reached, _consume_prey_if_reached
-from .behaviors_ns import step_behavior
-from .lineage_stub import LineageStub
+from ns_sim_2_0.sim.engine_ns import end_of_day_selection, _clamp_speed, _apply_energy, _apply_motion, _consume_food_if_reached, _consume_prey_if_reached
+from ns_sim_2_0.sim.behaviors_ns import step_behavior
+from ns_sim_2_0.sim.genetics_ns import make_child_from
+from ns_sim_2_0.sim.lineage_stub import LineageStub
 
 class LiveSimNS:
+    """Frame-by-frame simulation for UI; mirrors evo_sim.sim.live but with NS rules & mutation."""
     def __init__(self, population: List[EvoCreature], seed: int = 42, lineage=None):
         from evo_sim.sim.rng import RNG
         RNG.seed(seed)
@@ -19,9 +20,12 @@ class LiveSimNS:
         self.day: int = 1
         self.step_in_day: int = 0
         self._next_id = max((c.id for c in population), default=0) + 1
+
+        # UI mutation toggles (HUD shows these)
         self.mutate_speed = True
         self.mutate_size  = True
         self.mutate_sense = True
+
         self.lineage = lineage if lineage is not None else LineageStub()
         self.last_population_snapshot = None
         self.start_new_day()
@@ -60,6 +64,7 @@ class LiveSimNS:
         self.step_in_day += 1
 
     def step(self) -> bool:
+        # Extinction guard
         if len(self.population) == 0:
             sp = Species(1, "NS", (120,160,240), aggression=0.0, bravery=0.0, metabolism=1.0, diet="omnivore")
             for i in range(16):
@@ -70,24 +75,42 @@ class LiveSimNS:
             self._next_id += 16
             self.start_new_day()
             return True
+
         self._step_once()
         if self.step_in_day < int(WORLD.day_steps):
             return False
-        survivors, repro_orders = end_of_day_selection(self.population)
+
+        # End-of-day: selection & reproduction with mutation
+        survivors, repro_parents = end_of_day_selection(self.population)
         self.last_population_snapshot = list(self.population)
+
         new_pop: List[EvoCreature] = []
+        # survivors carry traits forward
         for s in survivors:
-            new_pop.append(EvoCreature(id=s.id, species=s.species, speed=s.speed, size=s.size, sense=s.sense,
-                                       x=0.0,y=0.0, home=(0.0,0.0), energy=0.0))
-        for p in repro_orders:
-            new_pop.append(EvoCreature(id=self._next_id, species=p.species, speed=p.speed, size=p.size, sense=p.sense,
-                                       x=0.0,y=0.0, home=(0.0,0.0), energy=0.0))
+            new_pop.append(EvoCreature(
+                id=s.id, species=s.species,
+                speed=s.speed, size=s.size, sense=s.sense,
+                x=0.0, y=0.0, home=(0.0,0.0), energy=0.0
+            ))
+        # offspring with mutation controlled by UI toggles
+        for p in repro_parents:
+            child = make_child_from(
+                parent=p,
+                next_id=self._next_id,
+                mutate_speed=self.mutate_speed,
+                mutate_size=self.mutate_size,
+                mutate_sense=self.mutate_sense,
+                species=p.species,
+            )
+            new_pop.append(child)
             self._next_id += 1
+
         self.population = new_pop
         self.day += 1
         self.start_new_day()
         return True
 
+    # UI helpers expected by renderer
     def food_positions(self):
         return [(f.x, f.y) for f in self.world.food]
 
@@ -95,7 +118,9 @@ class LiveSimNS:
         n = len(self.population)
         if n == 0:
             return dict(n=0, mean_speed=float('nan'), mean_size=float('nan'), mean_sense=float('nan'))
-        return dict(n=n,
-                    mean_speed=sum(c.speed for c in self.population)/n,
-                    mean_size=sum(c.size for c in self.population)/n,
-                    mean_sense=sum(c.sense for c in self.population)/n)
+        return dict(
+            n=n,
+            mean_speed=sum(c.speed for c in self.population)/n,
+            mean_size=sum(c.size for c in self.population)/n,
+            mean_sense=sum(c.sense for c in self.population)/n,
+        )

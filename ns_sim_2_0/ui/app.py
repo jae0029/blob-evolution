@@ -5,7 +5,7 @@ from evo_sim.ui.renderer import Renderer
 from evo_sim.ui.csv_writer import DailyCsvLogger
 from evo_sim.sim.config import WORLD, SIM
 from evo_sim.sim.models import Creature, Species
-from ns_sim.sim.live_ns import LiveSimNS
+from ns_sim_2_0.sim.live_ns import LiveSimNS
 
 WIDTH, HEIGHT = 1200, 720
 
