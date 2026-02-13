@@ -1,0 +1,7 @@
+# core
+pandas
+matplotlib
+pygame
+numpy
+# analysis convenience
+seaborn  # optional; used only if you import it in analysis
