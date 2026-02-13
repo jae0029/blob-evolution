@@ -115,10 +115,7 @@ def export_csv(df: pd.DataFrame, outdir: str, base: str, tag: str | None) -> str
     print(f"[OK] Wrote {fpath}")
     return fpath
 
-def plot_overall(df_overall: pd.DataFrame,
-                 df_species: pd.DataFrame | None,
-                 outdir: str,
-                 tag: str | None):
+def plot_overall(df_overall, df_species, outdir: str, tag: str | None):
     """
     Trends figure with 3 subplots:
       (1) ONLY Total N + per-species N (one line per species).
@@ -126,51 +123,50 @@ def plot_overall(df_overall: pd.DataFrame,
       (3) Avg sense (alone).
     """
     ensure_dir(outdir)
+    import numpy as np
+    import pandas as pd
+    import os
+    import sys
+    import matplotlib.pyplot as plt
+
     fig, ax = plt.subplots(3, 1, figsize=(10, 11), sharex=True)
 
     # ---------------- (1) ONLY Total N + per-species N ----------------
-    # If there are multiple sessions in df_overall, we plot the mean N per day.
     g_overall = df_overall.copy()
     for col in ("day", "n"):
         if col in g_overall.columns:
             g_overall[col] = pd.to_numeric(g_overall[col], errors="coerce")
 
+    # If multiple sessions exist, average N by day
     if "session_id" in g_overall.columns:
-        g_overall = (g_overall
-                     .groupby("day", as_index=False)["n"]
-                     .mean())
+        g_overall = (g_overall.groupby("day", as_index=False)["n"].mean())
 
     if {"day", "n"} <= set(g_overall.columns):
         ax[0].plot(g_overall["day"], g_overall["n"],
                    label="Total N", color="black", linewidth=2.25)
 
-    # Overlay per-species N (mean across sessions if present)
+    # Overlay per-species N if provided
     if df_species is not None and len(df_species) > 0:
         dfs = df_species.copy()
         for col in ("day", "n"):
             if col in dfs.columns:
                 dfs[col] = pd.to_numeric(dfs[col], errors="coerce")
 
-        # Grouping keys that actually exist
         has_sid = "species_id" in dfs.columns
         has_sname = "species_name" in dfs.columns
-
         group_keys = []
         if has_sid:   group_keys.append("species_id")
         if has_sname: group_keys.append("species_name")
         group_keys.append("day")
 
         try:
-            g_species = (dfs
-                         .groupby(group_keys, as_index=False)["n"]
-                         .mean())
+            g_species = (dfs.groupby(group_keys, as_index=False)["n"].mean())
 
-            # Series identifier for legend: prefer id+name if both exist
-            species_keys = ["species_id", "species_name"] if (has_sid and has_sname) else (
-                           ["species_id"] if has_sid else ["species_name"])
+            # Identify species series for legend
+            species_keys = (["species_id", "species_name"] if (has_sid and has_sname)
+                            else (["species_id"] if has_sid else ["species_name"]))
 
             for spec_key, sub in g_species.groupby(species_keys):
-                # Build readable label
                 if isinstance(spec_key, tuple):
                     label = "N — " + " ".join(str(v) for v in spec_key if pd.notna(v))
                 else:
