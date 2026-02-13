@@ -40,7 +40,7 @@ class TraitConfig:
     min_sense: float = 5.0
     max_sense: float = 140.0
     sense_food_scale: float = 1.25
-    sense_pred_scale: float = 1.25
+    sense_pred_scale: float = 1.5
     sense_prey_scale: float = 1.0
 
 # ------------------------------------------------------------
@@ -75,19 +75,28 @@ class SpeciationConfig:
 # ------------------------------------------------------------
 @dataclass(frozen=True)
 class RiskConfig:
-    base_p_kill: float = 0.45
+    base_p_kill: float = 0.35
     size_weight: float = 0.60
-    speed_weight: float = 0.50
+    speed_weight: float = 0.25
     min_p_kill: float = 0.05
     max_p_kill: float = 0.98
-    injury_on_fail_prob: float = 0.55
+    injury_on_fail_prob: float = 0.75
     injury_days_min: int = 1
     injury_days_max: int = 3
     injury_speed_mult_lo: float = 0.60
     injury_speed_mult_hi: float = 0.90
     energy_loss_on_fail: float = 8.0
-    fatal_counterattack_prob: float = 0.06     # if prey >= 1.2x size
+    fatal_counterattack_prob: float = 0.10    # if prey >= 1.2x size
     injury_energy_leak_per_time: float = 0.003 # per time unit while injured
+
+# ------------------------------------------------------------
+# PREDATOR AVOIDANCE (PREY BEHAVIOR)
+# ------------------------------------------------------------
+@dataclass(frozen=True)
+class PreyAvoidConfig:
+    radius_mult: float = 1.6   # scan radius relative to r_pred
+    min_count:   int   = 2     # number of predators within scan to trigger avoidance
+
 
 # ------------------------------------------------------------
 # HEADLESS SETTINGS
@@ -111,3 +120,4 @@ REPRO = ReproConfig()
 SPECIATION = SpeciationConfig()
 RISK = RiskConfig()
 SIM = SimConfig()
+PREY_AVOID = PreyAvoidConfig()

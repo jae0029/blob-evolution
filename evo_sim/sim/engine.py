@@ -138,6 +138,8 @@ def simulate_day(world: World, population: List[Creature]) -> None:
             _consume_prey_if_reached(me, population)   # predation first
             _consume_food_if_reached(world, me)        # then food
 
+
+
 def end_of_day_selection(population: List[Creature]) -> Tuple[List[Creature], List[Tuple[Creature, int]]]:
     """
     Returns (survivors, repro_orders) where each repro order is (parent, num_offspring).
@@ -153,11 +155,16 @@ def end_of_day_selection(population: List[Creature]) -> Tuple[List[Creature], Li
     Reproduction:
       carnivore: if prey_kills_today >= 1 and home -> 1 offspring
       omnivore : if (prey_kills_today >= 1 or eaten >= 2) and home -> 1 offspring
-      herbivore: if eaten >= 3 and home -> 2 offspring
-                 elif eaten >= 2 and home -> 1 offspring
+      herbivore:
+          if eaten >= 3 and home -> 2 offspring
+          elif eaten >= 2 and home -> 1 offspring
+          elif eaten == 1 and home -> chance(p_one_food) of 1 offspring   <-- NEW
     """
     survivors: List[Creature] = []
     repro_orders: List[Tuple[Creature, int]] = []
+
+    # NEW: configurable chance for the "one-food baby"
+    HERB_REPRO_ONEFOOD_CHANCE = 0.25  # 25% by default; tune 0.20~0.30 as desired
 
     for c in population:
         if not c.alive:
@@ -176,24 +183,34 @@ def end_of_day_selection(population: List[Creature]) -> Tuple[List[Creature], Li
         diet = c.species.diet.lower()
 
         if c.eaten >= 1:
+            # must be home to keep gains
             if not c.at_home(WORLD.home_margin):
                 c.alive = False
                 continue
+
             survivors.append(c)
 
+            # reproduction rules
             if diet == "carnivore":
                 if c.prey_kills_today >= 1:
                     repro_orders.append((c, 1))
+
             elif diet == "omnivore":
                 if (c.prey_kills_today >= 1) or (c.eaten >= 2):
                     repro_orders.append((c, 1))
+
             else:  # herbivore
                 if c.eaten >= 3:
                     repro_orders.append((c, 2))
                 elif c.eaten >= 2:
                     repro_orders.append((c, 1))
+                elif c.eaten == 1:
+                    # NEW: small chance to get 1 baby on a 1-food day
+                    if RNG.uniform(0.0, 1.0) < HERB_REPRO_ONEFOOD_CHANCE:
+                        repro_orders.append((c, 1))
+
         else:
-            # ate 0, but streak < 2: persist, no reproduction
+            # ate 0 but streak < 2: persist (no reproduction)
             survivors.append(c)
 
     return survivors, repro_orders

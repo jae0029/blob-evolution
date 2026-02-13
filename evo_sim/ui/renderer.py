@@ -324,7 +324,11 @@ class Renderer:
         y_title = self.font.render("Size",  True, (220,220,230))
         self.screen.blit(x_title, (left + (box.w - x_title.get_width())//2, bottom + 22))
         y_surf = pygame.transform.rotate(y_title, 90)
-        self.screen.blit(y_surf, (left - y_surf.get_width() - 12), (top + (box.h - y_surf.get_height())//2))
+        # NEW (destination is a single (x, y) tuple)
+        self.screen.blit(
+            y_surf,
+            (left - y_surf.get_width() - 12, top + (box.h - y_surf.get_height()) // 2)
+        )
 
     # ---------- Phylogeny panel (if you implemented earlier, keep your version) ----------
     def draw_phylogeny_panel(self, lineage, current_day: int):

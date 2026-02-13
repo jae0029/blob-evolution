@@ -7,8 +7,13 @@ from .models import Creature
 from .config import TRAITS, BEHAV, WORLD, ENERGY, RISK
 from .rng import RNG
 from .world import World
+from .config import PREY_AVOID
 
 Vec = Tuple[float, float]
+
+# --- Predator density avoidance (prey) knobs ---
+AVOID_RADIUS_MULT = getattr(PREY_AVOID, "radius_mult", 1.6)
+AVOID_MIN_COUNT   = getattr(PREY_AVOID, "min_count",   2)
 
 # ---------------- vector helpers ----------------
 def _unit(v: Vec) -> Vec:
@@ -150,7 +155,7 @@ def step_behavior(world: World, me: Creature, others: List[Creature], dt: float,
     for o in others:
         if not o.alive or o.id == me.id:
             continue
-        if o.size >= 1.2 * me.size:
+        if o.size >= 1.1 * me.size:
             d2 = (o.x - me.x)**2 + (o.y - me.y)**2
             if d2 <= best_pd2:
                 predator = o
@@ -169,6 +174,31 @@ def step_behavior(world: World, me: Creature, others: List[Creature], dt: float,
             v_desired = eff_speed
         to_home = (me.home[0] - me.x, me.home[1] - me.y)
         return _mul(_unit(to_home), v_desired)
+
+
+    # ---------- NEW: Predator density avoidance for PREY (herbivores) ----------
+    if (diet == "herbivore") or (diet == "omnivore" and me.prey_kills_today == 0 and me.eaten == 0):
+    # same avoidance logic
+        # scan a bit wider than direct-flee radius
+        scan_r = r_pred * AVOID_RADIUS_MULT
+        scan_r2 = scan_r * scan_r
+        cx = cy = 0.0
+        cnt = 0
+        for o in others:
+            if not o.alive or o.id == me.id:
+                continue
+            od = o.species.diet.lower()
+            if od in ("carnivore", "omnivore"):
+                d2 = (o.x - me.x)**2 + (o.y - me.y)**2
+                if d2 <= scan_r2:
+                    cx += o.x; cy += o.y; cnt += 1
+        if cnt >= AVOID_MIN_COUNT:
+            cx /= cnt; cy /= cnt
+            away = (me.x - cx, me.y - cy)
+            ax, ay = _unit(away)
+            # if we have a valid direction, move away from the predator cluster
+            if ax != 0.0 or ay != 0.0:
+                return _mul((ax, ay), eff_speed)
 
     # ---------- Foraging logic ----------
     if diet in ("herbivore", "omnivore"):

@@ -61,11 +61,11 @@ def run_ui():
     logger = DailyCsvLogger(overall_path="runs/ui_daily.csv",
                         species_path="runs/ui_species_daily.csv",
                         enable_species=True)
-    old_panel = renderer.panel_mode
-    old_glyph = renderer.glyph_mode
+    # old_panel = renderer.panel_mode
+    # old_glyph = renderer.glyph_mode
     renderer = Renderer(screen, world_rect, panel_rect)
-    renderer.panel_mode = old_panel
-    renderer.glyph_mode = old_glyph
+    # renderer.panel_mode = old_panel
+    # renderer.glyph_mode = old_glyph
 
     recorder = Recorder(enabled=False, stride_steps=2, world_size=WORLD.width, dt=WORLD.dt, steps_per_day=WORLD.day_steps)
 
