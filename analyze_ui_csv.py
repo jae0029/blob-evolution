@@ -205,6 +205,90 @@ def plot_overall(df_overall, df_species, outdir: str, tag: str | None):
 
 
 def plot_species(df_species: pd.DataFrame, outdir: str, tag: str | None):
+    """
+    For each species, produce a 3-row figure:
+      (1) ONLY species N over time (no alive_end, no ate0/1/2+)
+      (2) Avg speed & Avg size
+      (3) Avg sense
+    Saves one PNG per species.
+    """
+    if df_species is None or len(df_species) == 0:
+        print("[INFO] No species CSV provided or empty; skipping per‑species plots.")
+        return
+
+    ensure_dir(outdir)
+
+    # Coerce numerics we rely on
+    for col in ("day", "n", "avg_speed", "avg_size", "avg_sense"):
+        if col in df_species.columns:
+            df_species[col] = pd.to_numeric(df_species[col], errors="coerce")
+
+    # Choose grouping key (prefer id if available)
+    group_key = "species_id" if "species_id" in df_species.columns else (
+                "species_name" if "species_name" in df_species.columns else None)
+    if group_key is None:
+        print("[INFO] No species identifier columns found; skipping species plots.")
+        return
+
+    # Group by species, then average over sessions per day (if sessions exist)
+    for key, sub in df_species.groupby(group_key):
+        # Aggregate per day (mean across sessions if present)
+        agg_map = {"n": "mean"}
+        if "avg_speed" in sub.columns: agg_map["avg_speed"] = "mean"
+        if "avg_size"  in sub.columns: agg_map["avg_size"]  = "mean"
+        if "avg_sense" in sub.columns: agg_map["avg_sense"] = "mean"
+
+        sub_g = (sub.groupby("day", as_index=False)
+                    .agg(agg_map)
+                    .sort_values("day"))
+
+        # Build display name
+        if "species_name" in sub.columns:
+            try:
+                name = str(sub["species_name"].iloc[0])
+            except Exception:
+                name = f"{group_key}={key}"
+        else:
+            name = f"{group_key}={key}"
+
+        # --- figure with 3 subplots
+        fig, ax = plt.subplots(3, 1, figsize=(10, 11), sharex=True)
+
+        # (1) ONLY species N over time
+        if {"day", "n"} <= set(sub_g.columns):
+            ax[0].plot(sub_g["day"], sub_g["n"], label=f"N — {name}", linewidth=2.0)
+        ax[0].set_ylabel("Count")
+        ax[0].legend(loc="best")
+        ax[0].grid(alpha=0.25)
+
+        # (2) Avg speed & Avg size
+        drew_any = False
+        if "avg_speed" in sub_g.columns:
+            ax[1].plot(sub_g["day"], sub_g["avg_speed"], label="Speed")
+            drew_any = True
+        if "avg_size" in sub_g.columns:
+            ax[1].plot(sub_g["day"], sub_g["avg_size"],  label="Size")
+            drew_any = True
+        if drew_any:
+            ax[1].legend(loc="best")
+        ax[1].set_ylabel("Trait value")
+        ax[1].grid(alpha=0.25)
+
+        # (3) Avg sense
+        if "avg_sense" in sub_g.columns:
+            ax[2].plot(sub_g["day"], sub_g["avg_sense"], color="tab:purple", label="Sense")
+            ax[2].legend(loc="best")
+        ax[2].set_xlabel("Day")
+        ax[2].set_ylabel("Sense")
+        ax[2].grid(alpha=0.25)
+
+        fig.suptitle(f"Species {key} — {name}")
+        fig.tight_layout()
+        png = os.path.join(outdir, f"species_{key}_trends_{timestamp(tag)}.png")
+        fig.savefig(png, dpi=160)
+        plt.close(fig)
+        print(f"[OK] Saved {png}")
+        
     if df_species is None or len(df_species) == 0:
         print("[INFO] No species CSV provided or empty; skipping per‑species plots.")
         return
