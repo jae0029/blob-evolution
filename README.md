@@ -31,3 +31,9 @@ python analyze_ui_csv.py --overall runs/ui_daily.csv --species runs/ui_species_d
 
 python -m evo_sim.main --ui
 python analyze_ui_csv.py --overall runs/ui_daily.csv --species runs/ui_species_daily.csv --outdir reports --tag test
+
+
+git status
+git add -A
+git commit -m "Describe what you changed"
+git push
