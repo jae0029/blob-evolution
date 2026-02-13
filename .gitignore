@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+
+# Virtual envs
+.venv/
+venv/
+ENV/
+
+# OS / Editor
+.DS_Store
+.vscode/
+
+# Runs / logs / reports (generated)
+runs/
+reports/
+recordings/
+*.npz
+*.png
+
+# Cache
+.ipynb_checkpoints/
+.cache/
