@@ -115,39 +115,87 @@ def export_csv(df: pd.DataFrame, outdir: str, base: str, tag: str | None) -> str
     print(f"[OK] Wrote {fpath}")
     return fpath
 
-def plot_overall(df_overall: pd.DataFrame, outdir: str, tag: str | None):
+def plot_overall(df_overall: pd.DataFrame,
+                 df_species: pd.DataFrame | None,
+                 outdir: str,
+                 tag: str | None):
+    """
+    Trends figure with 3 subplots:
+      (1) ONLY Total N + per-species N (one line per species).
+      (2) Avg speed & Avg size (no sense, no metabolism).
+      (3) Avg sense (alone).
+    """
     ensure_dir(outdir)
-    fig, ax = plt.subplots(3, 1, figsize=(10, 11), sharex=True)  # ← three rows now
+    fig, ax = plt.subplots(3, 1, figsize=(10, 11), sharex=True)
 
-    g = df_overall
+    # ---------------- (1) ONLY Total N + per-species N ----------------
+    # If there are multiple sessions in df_overall, we plot the mean N per day.
+    g_overall = df_overall.copy()
+    for col in ("day", "n"):
+        if col in g_overall.columns:
+            g_overall[col] = pd.to_numeric(g_overall[col], errors="coerce")
 
-    # ---- Subplot 1: counts ----
-    if "day" in g.columns and "n" in g.columns:
-        ax[0].plot(g["day"], g["n"], label="N (start of day)")
-    if "alive_end" in g.columns:
-        ax[0].plot(g["day"], g["alive_end"], label="Alive end-of-day")
-    if "ate0" in g.columns:
-        ax[0].plot(g["day"], g["ate0"], label="Ate 0")
-    if "ate1" in g.columns:
-        ax[0].plot(g["day"], g["ate1"], label="Ate 1")
-    if "ate2p" in g.columns:
-        ax[0].plot(g["day"], g["ate2p"], label="Ate 2+")
+    if "session_id" in g_overall.columns:
+        g_overall = (g_overall
+                     .groupby("day", as_index=False)["n"]
+                     .mean())
+
+    if {"day", "n"} <= set(g_overall.columns):
+        ax[0].plot(g_overall["day"], g_overall["n"],
+                   label="Total N", color="black", linewidth=2.25)
+
+    # Overlay per-species N (mean across sessions if present)
+    if df_species is not None and len(df_species) > 0:
+        dfs = df_species.copy()
+        for col in ("day", "n"):
+            if col in dfs.columns:
+                dfs[col] = pd.to_numeric(dfs[col], errors="coerce")
+
+        # Grouping keys that actually exist
+        has_sid = "species_id" in dfs.columns
+        has_sname = "species_name" in dfs.columns
+
+        group_keys = []
+        if has_sid:   group_keys.append("species_id")
+        if has_sname: group_keys.append("species_name")
+        group_keys.append("day")
+
+        try:
+            g_species = (dfs
+                         .groupby(group_keys, as_index=False)["n"]
+                         .mean())
+
+            # Series identifier for legend: prefer id+name if both exist
+            species_keys = ["species_id", "species_name"] if (has_sid and has_sname) else (
+                           ["species_id"] if has_sid else ["species_name"])
+
+            for spec_key, sub in g_species.groupby(species_keys):
+                # Build readable label
+                if isinstance(spec_key, tuple):
+                    label = "N — " + " ".join(str(v) for v in spec_key if pd.notna(v))
+                else:
+                    label = f"N — {spec_key}"
+                ax[0].plot(sub["day"], sub["n"], linewidth=1.6, label=label)
+        except Exception as e:
+            print(f"[WARN] Skipping per-species N overlay: {e}", file=sys.stderr)
+
     ax[0].set_ylabel("Count")
-    ax[0].legend(loc="best")
+    ax[0].legend(loc="best", ncols=2)
     ax[0].grid(alpha=0.25)
 
-    # ---- Subplot 2: traits (Speed & Size only) ----
-    if "avg_speed" in g.columns:
-        ax[1].plot(g["day"], g["avg_speed"], label="Avg speed")
-    if "avg_size" in g.columns:
-        ax[1].plot(g["day"], g["avg_size"],  label="Avg size")
+    # ---------------- (2) Avg speed & Avg size (no sense here) ----------------
+    if "avg_speed" in df_overall.columns:
+        ax[1].plot(df_overall["day"], df_overall["avg_speed"], label="Avg speed")
+    if "avg_size" in df_overall.columns:
+        ax[1].plot(df_overall["day"], df_overall["avg_size"],  label="Avg size")
     ax[1].set_ylabel("Trait value")
     ax[1].legend(loc="best")
     ax[1].grid(alpha=0.25)
 
-    # ---- Subplot 3: Sense only (new) ----
-    if "avg_sense" in g.columns:
-        ax[2].plot(g["day"], g["avg_sense"], color="tab:purple", label="Avg sense")
+    # ---------------- (3) Avg sense only ----------------
+    if "avg_sense" in df_overall.columns:
+        ax[2].plot(df_overall["day"], df_overall["avg_sense"],
+                   color="tab:purple", label="Avg sense")
     ax[2].set_xlabel("Day")
     ax[2].set_ylabel("Sense")
     ax[2].legend(loc="best")
