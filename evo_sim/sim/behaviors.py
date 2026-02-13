@@ -14,6 +14,12 @@ Vec = Tuple[float, float]
 # --- Predator density avoidance (prey) knobs ---
 AVOID_RADIUS_MULT = getattr(PREY_AVOID, "radius_mult", 1.6)
 AVOID_MIN_COUNT   = getattr(PREY_AVOID, "min_count",   2)
+# --- Hungry-predator bravery knobs ---
+HUNGRY_STREAK_FOR_BRAVERY = 1        # when >= 1, get “braver”
+HUNGRY_PKILL_BONUS        = 0.10     # +10% absolute bump to perceived p_kill (clamped in [min,max])
+HUNGRY_PREY_RADIUS_MULT   = 1.15     # slightly wider prey pursuit radius
+HUNGRY_MIN_SCORE          = 0.005    # lower chase threshold (was ~0.02)
+BASE_MIN_SCORE            = 0.02
 
 # ---------------- vector helpers ----------------
 def _unit(v: Vec) -> Vec:
@@ -219,28 +225,43 @@ def step_behavior(world: World, me: Creature, others: List[Creature], dt: float,
 
     # ---------- Predator/omnivore hunting ----------
     if diet in ("carnivore", "omnivore"):
+        # Decide whether we even want to hunt this step
         want_hunt = (diet == "carnivore") or (me.species.aggression > 0.5 or me.eaten == 0)
-        # Dynamic kill cap: 1 normally; 2 if hungry_streak >= 1
-        max_kills_today = 2 if me.hungry_streak >= 1 else 1
-        if me.prey_kills_today >= max_kills_today:
+
+        # --- HARD CAP: never hunt once we've made 1 kill today ---
+        if me.prey_kills_today >= 1:
             want_hunt = False
 
         if want_hunt:
+            # Hungry → “braver”: expand pursuit radius and relax risk threshold
+            hungry = (me.hungry_streak >= HUNGRY_STREAK_FOR_BRAVERY)
+            scan_r_prey = r_prey * (HUNGRY_PREY_RADIUS_MULT if hungry else 1.0)
+            min_score   = HUNGRY_MIN_SCORE if hungry else BASE_MIN_SCORE
+
             candidate = None
             best_score = -1.0
+
             for o in others:
                 if not o.alive or o.id == me.id:
                     continue
                 if not can_eat(me, o):
                     continue
+
+                # Estimate kill probability
                 p_kill = _kill_probability(me, o)
+                if hungry:
+                    # “bravery” effect: be more willing to engage risky targets
+                    p_kill = max(float(RISK.min_p_kill), min(float(RISK.max_p_kill), p_kill + HUNGRY_PKILL_BONUS))
+
                 d = math.hypot(o.x - me.x, o.y - me.y)
-                if d <= r_prey:
+                if d <= scan_r_prey:
+                    # prefer higher success & nearer targets
                     score = p_kill / (1.0 + d)
                     if score > best_score:
                         best_score = score
                         candidate = o
-            if candidate is not None and best_score >= 0.02:
+
+            if candidate is not None and best_score >= min_score:
                 to_prey = (candidate.x - me.x, candidate.y - me.y)
                 return _mul(_unit(to_prey), eff_speed)
 
