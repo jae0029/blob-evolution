@@ -406,9 +406,12 @@ def main():
         export_csv(df_species, args.outdir, base="species_summary", tag=(args.tag or None))
 
     # Plots (also timestamped)
-    plot_overall(df_overall, args.outdir, tag=(args.tag or None))
-    if df_species is not None and len(df_species) > 0 and (args.species and args.species.strip()):
-        plot_species(df_species, args.outdir, tag=(args.tag or None))
+    plot_overall(
+        df_overall,
+        df_species if (args.species and args.species.strip() and df_species is not None) else None,
+        args.outdir,
+        tag=(args.tag or None)
+    )
 
     print(f"\nDone. Outputs are in: {args.outdir}")
 
