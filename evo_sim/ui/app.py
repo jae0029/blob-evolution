@@ -9,7 +9,7 @@ from ..sim.rng import RNG
 from ..sim.config import WORLD, SIM
 from ..sim.lineage import LineageTracker
 from .csv_writer import DailyCsvLogger
-
+    
 def _seed_species():
     return [
         Species(id=1, name="Omnivore",   color=(70,140,240), aggression=0.35, bravery=0.55, metabolism=1.00, diet="omnivore"),
@@ -61,7 +61,12 @@ def run_ui():
     logger = DailyCsvLogger(overall_path="runs/ui_daily.csv",
                         species_path="runs/ui_species_daily.csv",
                         enable_species=True)
+    old_panel = renderer.panel_mode
+    old_glyph = renderer.glyph_mode
     renderer = Renderer(screen, world_rect, panel_rect)
+    renderer.panel_mode = old_panel
+    renderer.glyph_mode = old_glyph
+
     recorder = Recorder(enabled=False, stride_steps=2, world_size=WORLD.width, dt=WORLD.dt, steps_per_day=WORLD.day_steps)
 
     paused = False
@@ -110,6 +115,11 @@ def run_ui():
                     logger.enable_species = not logger.enable_species
                 elif e.key == pygame.K_t:
                     renderer.panel_mode = "phylo" if renderer.panel_mode == "traits" else "traits"
+                    # --- inside the main event loop ---
+                elif e.key == pygame.K_t:
+                    renderer.panel_mode = "phylo" if renderer.panel_mode == "traits" else "traits"
+                elif e.key == pygame.K_g:
+                    renderer.glyph_mode = "quads" if renderer.glyph_mode == "rings" else "rings"
 
         if not paused:
             for _ in range(sim_speed):

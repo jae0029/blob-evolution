@@ -2,29 +2,37 @@
 """
 Analyze UI CSVs produced by DailyCsvLogger.
 
-Every run:
-  - Saves plots under --outdir
-  - Exports cleaned/aggregated CSVs with a fresh timestamp:
-      overall_summary_<timestamp>[__<tag>].csv
-      species_summary_<timestamp>[__<tag>].csv  (if --species provided)
-
-Usage:
+Features:
+  - --session latest|<id> filters to a single run (so you never need to delete runs/)
+  - Saves timestamped CSV exports and PNG plots under --outdir
+  - Overall plot:
+      (1) ONLY Total N + per‑species N
+      (2) Avg speed & Avg size
+      (3) Avg sense
+  - Species plots (one PNG per species):
+      (1) ONLY species N
+      (2) Avg speed & Avg size
+      (3) Avg sense
+Usage examples:
   python analyze_ui_csv.py --overall runs/ui_daily.csv \
                            --species runs/ui_species_daily.csv \
                            --outdir reports \
-                           --tag optional_label
+                           --tag demo \
+                           --session latest
 """
-import argparse, os, sys, time
+import argparse
+import os
+import sys
+import time
 import pandas as pd
+
+# Use non-interactive backend for headless operation
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-def _latest_session_id(df):
-    # pick the last session_id by file order; or by max day, if you prefer
-    if "session_id" not in df.columns or len(df) == 0:
-        return None
-    # last seen session_id in file order
-    return df["session_id"].dropna().iloc[-1]
 
+# ------------------------- utilities -------------------------
 def ensure_dir(p: str) -> None:
     os.makedirs(p, exist_ok=True)
 
@@ -32,113 +40,51 @@ def timestamp(tag: str | None = None) -> str:
     t = time.strftime("%Y%m%d_%H%M%S")
     return f"{t}__{tag}" if tag else t
 
+def exists(path: str | None) -> bool:
+    return bool(path and os.path.exists(path))
+
+
+# ------------------------- loading ---------------------------
 def load_csvs(overall_path: str, species_path: str | None):
-    if not overall_path or not os.path.exists(overall_path):
+    if not exists(overall_path):
         print(
             "\n[ERROR] Overall CSV not found.\n"
             f"  Expected: {overall_path}\n"
-            "  Hints:\n"
-            "   • Run the UI long enough for at least one day to finish.\n"
-            "   • Confirm logger paths in evo_sim/ui/app.py match these args.\n"
-            "   • Default logger writes to runs/ui_daily.csv (and ui_species_daily.csv).\n",
+            "Hints:\n"
+            "  • Run the UI until at least one day completes (Day 1 → 2).\n"
+            "  • Confirm the logger paths in evo_sim/ui/app.py match these args.\n",
             file=sys.stderr
         )
         sys.exit(1)
 
     df_overall = pd.read_csv(overall_path)
-
-    df_species = None
-    if species_path and species_path.strip():
-        if os.path.exists(species_path):
-            df_species = pd.read_csv(species_path)
-        else:
-            print(
-                "[WARN] Species CSV path provided but not found; continuing without per‑species export/plots:\n"
-                f"  {species_path}\n",
-                file=sys.stderr
-            )
-            df_species = None
+    df_species = pd.read_csv(species_path) if (species_path and exists(species_path)) else None
     return df_overall, df_species
 
-def clean_overall(df_overall: pd.DataFrame) -> pd.DataFrame:
-    # Cast numerics and keep expected columns if present
-    num_cols = ("day","n","alive_end","ate0","ate1","ate2p",
-                "avg_speed","avg_size","avg_sense","avg_metabolism",
-                "food_per_day","day_steps")
-    for col in num_cols:
-        if col in df_overall.columns:
-            df_overall[col] = pd.to_numeric(df_overall[col], errors="coerce")
 
-    # If multiple sessions are combined, group per session/day (safe aggregation)
-    if "session_id" in df_overall.columns:
-        keys = ["session_id", "day"]
-        agg = {
-            "n":"mean","alive_end":"mean","ate0":"mean","ate1":"mean","ate2p":"mean",
-            "avg_speed":"mean","avg_size":"mean","avg_sense":"mean","avg_metabolism":"mean",
-            "food_per_day":"mean","day_steps":"mean"
-        }
-        # Only keep cols that actually exist
-        agg = {k:v for k,v in agg.items() if k in df_overall.columns}
-        clean = (df_overall
-                 .groupby(keys, as_index=False)
-                 .agg(agg)
-                 .sort_values(keys))
-    else:
-        # Single session file
-        clean = df_overall.sort_values("day") if "day" in df_overall.columns else df_overall.copy()
+def _latest_session_id(df: pd.DataFrame) -> str | None:
+    """Return the last session_id in file order (used by --session latest)."""
+    if "session_id" not in df.columns or len(df) == 0:
+        return None
+    s = df["session_id"].dropna()
+    return s.iloc[-1] if len(s) else None
 
-    return clean
 
-def clean_species(df_species: pd.DataFrame) -> pd.DataFrame:
-    if df_species is None or len(df_species) == 0:
-        return pd.DataFrame()
-
-    num_cols = ("day","species_id","n","alive_end","ate0","ate1","ate2p",
-                "avg_speed","avg_size","avg_sense","metabolism")
-    for col in num_cols:
-        if col in df_species.columns:
-            df_species[col] = pd.to_numeric(df_species[col], errors="coerce")
-
-    keys = ["session_id","species_id","species_name","day"] \
-        if "session_id" in df_species.columns else ["species_id","species_name","day"]
-
-    agg = {
-        "n":"mean","alive_end":"mean","ate0":"mean","ate1":"mean","ate2p":"mean",
-        "avg_speed":"mean","avg_size":"mean","avg_sense":"mean","metabolism":"mean"
-    }
-    agg = {k:v for k,v in agg.items() if k in df_species.columns}
-
-    clean = (df_species
-             .groupby(keys, as_index=False)
-             .agg(agg)
-             .sort_values(keys))
-    return clean
-
-def export_csv(df: pd.DataFrame, outdir: str, base: str, tag: str | None) -> str:
-    ensure_dir(outdir)
-    fname = f"{base}_{timestamp(tag)}.csv"
-    fpath = os.path.join(outdir, fname)
-    df.to_csv(fpath, index=False)
-    print(f"[OK] Wrote {fpath}")
-    return fpath
-
-def plot_overall(df_overall, df_species, outdir: str, tag: str | None):
+# ------------------------- plotting --------------------------
+def plot_overall(df_overall: pd.DataFrame,
+                 df_species: pd.DataFrame | None,
+                 outdir: str,
+                 tag: str | None):
     """
     Trends figure with 3 subplots:
-      (1) ONLY Total N + per-species N (one line per species).
-      (2) Avg speed & Avg size (no sense, no metabolism).
-      (3) Avg sense (alone).
+      (1) ONLY Total N + per‑species N (one line per species).
+      (2) Avg speed & Avg size (no sense here).
+      (3) Avg sense.
     """
     ensure_dir(outdir)
-    import numpy as np
-    import pandas as pd
-    import os
-    import sys
-    import matplotlib.pyplot as plt
-
     fig, ax = plt.subplots(3, 1, figsize=(10, 11), sharex=True)
 
-    # ---------------- (1) ONLY Total N + per-species N ----------------
+    # -------- (1) ONLY Total N + per-species N --------
     g_overall = df_overall.copy()
     for col in ("day", "n"):
         if col in g_overall.columns:
@@ -152,7 +98,7 @@ def plot_overall(df_overall, df_species, outdir: str, tag: str | None):
         ax[0].plot(g_overall["day"], g_overall["n"],
                    label="Total N", color="black", linewidth=2.25)
 
-    # Overlay per-species N if provided
+    # Overlay per-species N (mean across sessions per day)
     if df_species is not None and len(df_species) > 0:
         dfs = df_species.copy()
         for col in ("day", "n"):
@@ -169,15 +115,12 @@ def plot_overall(df_overall, df_species, outdir: str, tag: str | None):
         try:
             g_species = (dfs.groupby(group_keys, as_index=False)["n"].mean())
 
-            # Identify species series for legend
             species_keys = (["species_id", "species_name"] if (has_sid and has_sname)
                             else (["species_id"] if has_sid else ["species_name"]))
 
             for spec_key, sub in g_species.groupby(species_keys):
-                if isinstance(spec_key, tuple):
-                    label = "N — " + " ".join(str(v) for v in spec_key if pd.notna(v))
-                else:
-                    label = f"N — {spec_key}"
+                label = ("N — " + " ".join(str(v) for v in spec_key if not isinstance(spec_key, float))) \
+                        if isinstance(spec_key, tuple) else f"N — {spec_key}"
                 ax[0].plot(sub["day"], sub["n"], linewidth=1.6, label=label)
         except Exception as e:
             print(f"[WARN] Skipping per-species N overlay: {e}", file=sys.stderr)
@@ -186,7 +129,7 @@ def plot_overall(df_overall, df_species, outdir: str, tag: str | None):
     ax[0].legend(loc="best", ncols=2)
     ax[0].grid(alpha=0.25)
 
-    # ---------------- (2) Avg speed & Avg size (no sense here) ----------------
+    # -------- (2) Avg speed & Avg size (no sense here) --------
     if "avg_speed" in df_overall.columns:
         ax[1].plot(df_overall["day"], df_overall["avg_speed"], label="Avg speed")
     if "avg_size" in df_overall.columns:
@@ -195,7 +138,7 @@ def plot_overall(df_overall, df_species, outdir: str, tag: str | None):
     ax[1].legend(loc="best")
     ax[1].grid(alpha=0.25)
 
-    # ---------------- (3) Avg sense only ----------------
+    # -------- (3) Avg sense --------
     if "avg_sense" in df_overall.columns:
         ax[2].plot(df_overall["day"], df_overall["avg_sense"],
                    color="tab:purple", label="Avg sense")
@@ -214,74 +157,68 @@ def plot_overall(df_overall, df_species, outdir: str, tag: str | None):
 def plot_species(df_species: pd.DataFrame, outdir: str, tag: str | None):
     """
     For each species, produce a 3-row figure:
-      (1) ONLY species N over time (no alive_end, no ate0/1/2+)
+      (1) ONLY species N over time
       (2) Avg speed & Avg size
       (3) Avg sense
-    Saves one PNG per species.
     """
     if df_species is None or len(df_species) == 0:
-        print("[INFO] No species CSV provided or empty; skipping per‑species plots.")
+        print("[INFO] No species CSV provided or rows = 0; skipping per‑species plots.")
         return
 
-    ensure_dir(outdir)
+    needed = {"day", "n"}
+    if not needed.issubset(df_species.columns):
+        print(f"[WARN] df_species missing required columns {needed - set(df_species.columns)}; skipping species plots.")
+        return
 
     # Coerce numerics we rely on
     for col in ("day", "n", "avg_speed", "avg_size", "avg_sense"):
         if col in df_species.columns:
             df_species[col] = pd.to_numeric(df_species[col], errors="coerce")
 
-    # Choose grouping key (prefer id if available)
     group_key = "species_id" if "species_id" in df_species.columns else (
                 "species_name" if "species_name" in df_species.columns else None)
     if group_key is None:
-        print("[INFO] No species identifier columns found; skipping species plots.")
+        print("[WARN] No species identifier column (species_id/species_name); skipping species plots.")
         return
 
-    # Group by species, then average over sessions per day (if sessions exist)
     for key, sub in df_species.groupby(group_key):
-        # Aggregate per day (mean across sessions if present)
-        agg_map = {"n": "mean"}
-        if "avg_speed" in sub.columns: agg_map["avg_speed"] = "mean"
-        if "avg_size"  in sub.columns: agg_map["avg_size"]  = "mean"
-        if "avg_sense" in sub.columns: agg_map["avg_sense"] = "mean"
+        agg = {"n": "mean"}
+        if "avg_speed" in sub.columns: agg["avg_speed"] = "mean"
+        if "avg_size"  in sub.columns: agg["avg_size"]  = "mean"
+        if "avg_sense" in sub.columns: agg["avg_sense"] = "mean"
 
         sub_g = (sub.groupby("day", as_index=False)
-                    .agg(agg_map)
+                    .agg(agg)
                     .sort_values("day"))
 
-        # Build display name
-        if "species_name" in sub.columns:
-            try:
-                name = str(sub["species_name"].iloc[0])
-            except Exception:
-                name = f"{group_key}={key}"
+        # Label
+        if "species_name" in sub.columns and pd.notna(sub["species_name"].iloc[0]):
+            name = str(sub["species_name"].iloc[0])
         else:
             name = f"{group_key}={key}"
 
-        # --- figure with 3 subplots
         fig, ax = plt.subplots(3, 1, figsize=(10, 11), sharex=True)
 
-        # (1) ONLY species N over time
-        if {"day", "n"} <= set(sub_g.columns):
-            ax[0].plot(sub_g["day"], sub_g["n"], label=f"N — {name}", linewidth=2.0)
+        # (1) ONLY N
+        ax[0].plot(sub_g["day"], sub_g["n"], label=f"N — {name}", linewidth=2.0)
         ax[0].set_ylabel("Count")
         ax[0].legend(loc="best")
         ax[0].grid(alpha=0.25)
 
-        # (2) Avg speed & Avg size
-        drew_any = False
+        # (2) Speed & Size
+        drawn = False
         if "avg_speed" in sub_g.columns:
             ax[1].plot(sub_g["day"], sub_g["avg_speed"], label="Speed")
-            drew_any = True
+            drawn = True
         if "avg_size" in sub_g.columns:
             ax[1].plot(sub_g["day"], sub_g["avg_size"],  label="Size")
-            drew_any = True
-        if drew_any:
+            drawn = True
+        if drawn:
             ax[1].legend(loc="best")
         ax[1].set_ylabel("Trait value")
         ax[1].grid(alpha=0.25)
 
-        # (3) Avg sense
+        # (3) Sense
         if "avg_sense" in sub_g.columns:
             ax[2].plot(sub_g["day"], sub_g["avg_sense"], color="tab:purple", label="Sense")
             ax[2].legend(loc="best")
@@ -295,79 +232,50 @@ def plot_species(df_species: pd.DataFrame, outdir: str, tag: str | None):
         fig.savefig(png, dpi=160)
         plt.close(fig)
         print(f"[OK] Saved {png}")
-        
-    if df_species is None or len(df_species) == 0:
-        print("[INFO] No species CSV provided or empty; skipping per‑species plots.")
-        return
-    ensure_dir(outdir)
 
-    # Cast numerics (safe)
-    for col in ("day","n","alive_end","ate0","ate1","ate2p","avg_speed","avg_size","avg_sense"):
+
+# ------------------------- exports (optional) -----------------
+def export_csv(df: pd.DataFrame, outdir: str, base: str, tag: str | None) -> str:
+    ensure_dir(outdir)
+    fname = f"{base}_{timestamp(tag)}.csv"
+    path = os.path.join(outdir, fname)
+    df.to_csv(path, index=False)
+    print(f"[OK] Wrote {path}")
+    return path
+
+
+def clean_overall(df_overall: pd.DataFrame) -> pd.DataFrame:
+    # Cast numerics
+    for col in ("day","n","alive_end","ate0","ate1","ate2p","avg_speed","avg_size","avg_sense","avg_metabolism","food_per_day","day_steps"):
+        if col in df_overall.columns:
+            df_overall[col] = pd.to_numeric(df_overall[col], errors="coerce")
+
+    # If multiple sessions are present, average by day
+    if "session_id" in df_overall.columns:
+        keep = [c for c in ("n","alive_end","ate0","ate1","ate2p","avg_speed","avg_size","avg_sense","avg_metabolism","food_per_day","day_steps") if c in df_overall.columns]
+        d = (df_overall.groupby("day", as_index=False)[keep].mean())
+        return d.sort_values("day")
+    return df_overall.sort_values("day") if "day" in df_overall.columns else df_overall.copy()
+
+
+def clean_species(df_species: pd.DataFrame | None) -> pd.DataFrame:
+    if df_species is None or len(df_species) == 0:
+        return pd.DataFrame()
+    # Cast numerics
+    for col in ("day","n","alive_end","ate0","ate1","ate2p","avg_speed","avg_size","avg_sense","metabolism"):
         if col in df_species.columns:
             df_species[col] = pd.to_numeric(df_species[col], errors="coerce")
+    # Average per species/day (across sessions)
+    keep = [c for c in ("n","alive_end","ate0","ate1","ate2p","avg_speed","avg_size","avg_sense","metabolism") if c in df_species.columns]
+    keys = ["species_id","species_name","day"]
+    keys = [k for k in keys if k in df_species.columns]
+    d = (df_species.groupby(keys, as_index=False)[keep].mean())
+    return d.sort_values(keys)
 
-    # Choose grouping key (id preferred)
-    group_key = "species_id" if "species_id" in df_species.columns else (
-                "species_name" if "species_name" in df_species.columns else None)
-    if group_key is None:
-        print("[INFO] No species identifier columns found; skipping species plots.")
-        return
 
-    for key, sub in df_species.groupby(group_key):
-        fig, ax = plt.subplots(3, 1, figsize=(10, 11), sharex=True)
-
-        name = None
-        if "species_name" in sub.columns:
-            try:
-                name = str(sub["species_name"].iloc[0])
-            except Exception:
-                name = f"{group_key}={key}"
-        else:
-            name = f"{group_key}={key}"
-
-        # ---- Subplot 1: counts ----
-        if all(c in sub.columns for c in ("day","n")):
-            ax[0].plot(sub["day"], sub["n"], label=f"{name} (N)")
-        if "alive_end" in sub.columns:
-            ax[0].plot(sub["day"], sub["alive_end"], label="Alive end")
-        if "ate0" in sub.columns:
-            ax[0].plot(sub["day"], sub["ate0"], label="Ate 0")
-        if "ate1" in sub.columns:
-            ax[0].plot(sub["day"], sub["ate1"], label="Ate 1")
-        if "ate2p" in sub.columns:
-            ax[0].plot(sub["day"], sub["ate2p"], label="Ate 2+")
-        ax[0].set_ylabel("Count")
-        ax[0].legend(loc="best")
-        ax[0].grid(alpha=0.25)
-
-        # ---- Subplot 2: Speed & Size only ----
-        if "avg_speed" in sub.columns:
-            ax[1].plot(sub["day"], sub["avg_speed"], label="Speed")
-        if "avg_size" in sub.columns:
-            ax[1].plot(sub["day"], sub["avg_size"],  label="Size")
-        ax[1].set_ylabel("Trait value")
-        ax[1].legend(loc="best")
-        ax[1].grid(alpha=0.25)
-
-        # ---- Subplot 3: Sense only ----
-        if "avg_sense" in sub.columns:
-            ax[2].plot(sub["day"], sub["avg_sense"], color="tab:purple", label="Sense")
-        ax[2].set_xlabel("Day")
-        ax[2].set_ylabel("Sense")
-        ax[2].legend(loc="best")
-        ax[2].grid(alpha=0.25)
-
-        fig.suptitle(f"Species {key} — {name}")
-        fig.tight_layout()
-        png = os.path.join(outdir, f"species_{key}_trends_{timestamp(tag)}.png")
-        fig.savefig(png, dpi=160)
-        plt.close(fig)
-        print(f"[OK] Saved {png}")
-
+# ------------------------- main ------------------------------
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--session", type=str, default="",
-                    help="Session ID to analyze; use 'latest' to pick the most recent session automatically.")
     ap.add_argument("--overall", type=str, default="runs/ui_daily.csv",
                     help="Path to overall daily CSV written by the UI")
     ap.add_argument("--species", type=str, default="runs/ui_species_daily.csv",
@@ -376,22 +284,23 @@ def main():
                     help="Output directory for plots and exported CSVs")
     ap.add_argument("--tag", type=str, default="",
                     help="Optional label to append to filenames (e.g., 'lowfood')")
+    ap.add_argument("--session", type=str, default="",
+                    help="Session ID to analyze; use 'latest' to pick the most recent session automatically.")
     args = ap.parse_args()
 
     df_overall_raw, df_species_raw = load_csvs(args.overall, args.species if args.species else None)
 
-    # Clean/aggregate
-    df_overall = clean_overall(df_overall_raw)
-    df_species = clean_species(df_species_raw) if df_species_raw is not None else pd.DataFrame()
-
     # Filter by session if requested
+    df_overall = df_overall_raw.copy()
+    df_species = df_species_raw.copy() if df_species_raw is not None else None
+
     if args.session:
         if "session_id" not in df_overall.columns:
-            print("[WARN] --session was provided but overall CSV has no session_id; ignoring filter.")
+            print("[WARN] --session provided but overall CSV has no session_id; ignoring.")
         else:
             sid = args.session
             if sid == "latest":
-                sid = _latest_session_id(df_overall)
+                sid = _latest_session_id(df_overall_raw)   # resolve from raw (unfiltered)
             if sid:
                 df_overall = df_overall[df_overall["session_id"] == sid].copy()
                 if df_species is not None and "session_id" in df_species.columns:
@@ -400,18 +309,24 @@ def main():
             else:
                 print("[WARN] Could not resolve latest session_id; analyzing all data.")
 
-    # Always export fresh CSVs with timestamp (and optional tag)
-    export_csv(df_overall, args.outdir, base="overall_summary", tag=(args.tag or None))
-    if df_species is not None and len(df_species) > 0 and (args.species and args.species.strip()):
-        export_csv(df_species, args.outdir, base="species_summary", tag=(args.tag or None))
+    print(f"[INFO] Overall rows after filter: {len(df_overall)}")
+    if df_species is not None:
+        print(f"[INFO] Species rows after filter: {len(df_species)}")
 
-    # Plots (also timestamped)
-    plot_overall(
-        df_overall,
-        df_species if (args.species and args.species.strip() and df_species is not None) else None,
-        args.outdir,
-        tag=(args.tag or None)
-    )
+    # Export cleaned/aggregated CSVs (timestamped)
+    df_overall_clean = clean_overall(df_overall)
+    export_csv(df_overall_clean, args.outdir, base="overall_summary", tag=(args.tag or None))
+
+    df_species_clean = clean_species(df_species)
+    if args.species and args.species.strip() and len(df_species_clean) > 0:
+        export_csv(df_species_clean, args.outdir, base="species_summary", tag=(args.tag or None))
+
+    # Plots
+    plot_overall(df_overall, df_species, args.outdir, tag=(args.tag or None))
+    if args.species and args.species.strip() and df_species is not None and len(df_species) > 0:
+        plot_species(df_species, args.outdir, tag=(args.tag or None))
+    else:
+        print("[INFO] No per‑species rows to plot (after optional --session filter); skipping species plots.")
 
     print(f"\nDone. Outputs are in: {args.outdir}")
 

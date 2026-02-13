@@ -18,7 +18,7 @@ python -m evo_sim.main --days 30 --pop 60 --seed 42 --csv runs/summary.csv
 python analyze_ui_csv.py --overall runs/ui_daily.csv --species runs/ui_species_daily.csv --outdir reports
 
 # One-shot launcher
-python run_sim_then_analyze.py --tag demo
+python run_sim_then_analyze.py --tag try
 
 ```
 # Developer Notes
