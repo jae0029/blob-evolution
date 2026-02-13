@@ -9,6 +9,12 @@ from .behaviors import step_behavior, bite_radius, can_eat
 from .config import WORLD, ENERGY, RISK
 from .rng import RNG
 
+def _is_in_own_home(creature: Creature) -> bool:
+    """True if the creature is within WORLD.home_margin of its home."""
+    dx = creature.x - creature.home[0]
+    dy = creature.y - creature.home[1]
+    return (dx*dx + dy*dy) <= (WORLD.home_margin * WORLD.home_margin)
+
 def _clamp_speed(vx: float, vy: float, vmax: float) -> Tuple[float, float]:
     spd = math.hypot(vx, vy)
     if spd <= vmax or spd <= 1e-12:
@@ -36,17 +42,26 @@ def _kill_probability(pred: Creature, prey: Creature) -> float:
          + RISK.speed_weight * (speed_adv / 6.0))
     return max(RISK.min_p_kill, min(RISK.max_p_kill, p))
 
+
 def _resolve_attack(pred: Creature, prey: Creature) -> None:
     if not pred.alive or not prey.alive:
         return
+
+    # HARD CAP: only 1 kill per day
     if pred.prey_kills_today >= 1:
         return
+
+    # Edibility (diet/size rules)
     if not can_eat(pred, prey):
         return
-    if prey.species.diet.lower() == "carnivore" and pred.hungry_streak < 1:
+
+    # --- HOME SAFE ZONE: do not allow killing prey at/inside its own home radius ---
+    if _is_in_own_home(prey):
         return
 
+    # (keep your success/fail logic as-is below)
     p_kill = _kill_probability(pred, prey)
+
     if RNG.uniform(0.0, 1.0) <= p_kill:
         prey.alive = False
         pred.eaten += 1
@@ -164,7 +179,7 @@ def end_of_day_selection(population: List[Creature]) -> Tuple[List[Creature], Li
     repro_orders: List[Tuple[Creature, int]] = []
 
     # NEW: configurable chance for the "one-food baby"
-    HERB_REPRO_ONEFOOD_CHANCE = 0.25  # 25% by default; tune 0.20~0.30 as desired
+    HERB_REPRO_ONEFOOD_CHANCE = 0.35  # 25% by default; tune 0.20~0.30 as desired
 
     for c in population:
         if not c.alive:

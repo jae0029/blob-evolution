@@ -100,7 +100,11 @@ class Renderer:
         sx, sy = self.world_to_screen(c.x, c.y)
 
         # radius by size (min 3 px)
-        base_r = max(3, int(3 + 3.0 * (c.size ** 1.3)))
+        SCALE = 1.5              # global enlargement
+        GROW  = 3.5              # growth factor
+        EXP   = 1.4              # exponent
+
+        base_r = max(3, int(SCALE * (3 + GROW * (c.size ** EXP))))
 
         # Base fill (alive/dead, done)
         if not c.alive:

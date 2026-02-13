@@ -42,7 +42,7 @@ class Creature:
 
     # Injury state
     injury_days_left: int = 0
-    injury_speed_mult: float = 1.0  # <1.0 while injured
+    injury_speed_mult: float = .8  # <1.0 while injured
 
     def pos(self) -> Vec:
         return (self.x, self.y)

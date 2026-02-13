@@ -105,6 +105,9 @@ def step_behavior(world: World, me: Creature, others: List[Creature], dt: float,
 
     # Bind diet EARLY so it's available in all branches
     diet = me.species.diet.lower()
+    # If we already have 3+ foods, commit to going home immediately
+    if me.eaten >= 3:
+        me.going_home = True
 
     eff_speed = me.effective_speed()
     Cmove  = float(ENERGY.C_move)
@@ -116,6 +119,8 @@ def step_behavior(world: World, me: Creature, others: List[Creature], dt: float,
     # ---------- Step-aware & energy-aware return-home ----------
     dxh, dyh = (me.home[0] - me.x, me.home[1] - me.y)
     dist_home = math.hypot(dxh, dyh)
+    at_home = (dist_home <= WORLD.home_margin)
+    near_home = (dist_home <= WORLD.home_margin * 1.1)  # small grace band
     steps_required = dist_home / max(eff_speed * dt, 1e-6)
 
     # (A) Step gate:
@@ -126,10 +131,10 @@ def step_behavior(world: World, me: Creature, others: List[Creature], dt: float,
             me.going_home = True
         elif me.eaten == 2:
             # Push for 3rd only if time/energy allow; else go home
-            if steps_required >= steps_left * 0.92:
+            if steps_required >= steps_left * 0.82:
                 me.going_home = True
         elif me.eaten == 1:
-            if steps_required >= steps_left * 0.90:
+            if steps_required >= steps_left * 0.80:
                 me.going_home = True
         else:
             # eaten == 0: do NOT force step-based go-home; keep searching unless energy is critical
@@ -155,18 +160,27 @@ def step_behavior(world: World, me: Creature, others: List[Creature], dt: float,
         # already handled >=3 above; at 2 we may still search if safe
         pass
 
-    # ---------- Flee predators ----------
+    # ---------- Flee predators (with home-safe override) ----------
     predator = None
     best_pd2 = r_pred * r_pred
     for o in others:
         if not o.alive or o.id == me.id:
             continue
-        if o.size >= 1.1 * me.size:
+        if o.size >= 1.2 * me.size:
             d2 = (o.x - me.x)**2 + (o.y - me.y)**2
             if d2 <= best_pd2:
                 predator = o
                 best_pd2 = d2
+
     if predator is not None:
+        # If we're at home, or essentially home and already returning, do NOT flee—finish return.
+        if at_home or (near_home and me.going_home):
+            # Either stand still or nudge into home to guarantee we stay in the safe radius.
+            if not at_home:
+                to_home = (me.home[0] - me.x, me.home[1] - me.y)
+                return _mul(_unit(to_home), eff_speed)
+            return (0.0, 0.0)  # at_home: hold position
+        # Otherwise, flee as usual
         away = (me.x - predator.x, me.y - predator.y)
         return _mul(_unit(away), eff_speed)
 
@@ -175,7 +189,7 @@ def step_behavior(world: World, me: Creature, others: List[Creature], dt: float,
         safety = 0.98
         if steps_left > 0:
             v_req = dist_home / max(steps_left * dt * safety, 1e-6)
-            v_desired = min(eff_speed, v_req * 1.05)
+            v_desired = min(eff_speed, v_req * 1.25)
         else:
             v_desired = eff_speed
         to_home = (me.home[0] - me.x, me.home[1] - me.y)

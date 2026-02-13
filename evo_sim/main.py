@@ -29,9 +29,9 @@ def init_population(n: int, start_id: int = 1, seed: int | None = None) -> List[
         pops.append(Creature(
             id=start_id + i,
             species=sp,
-            speed=RNG.uniform(1.5, 3.0),
-            size=RNG.uniform(0.8, 1.5),
-            sense=RNG.uniform(15.0, 40.0),
+            speed=RNG.uniform(0.75, 1.25),
+            size=RNG.uniform(0.75, 1.25),
+            sense=RNG.uniform(8.0, 15.0),
             x=0.0, y=0.0, home=(0.0,0.0), energy=0.0,
         ))
     return pops

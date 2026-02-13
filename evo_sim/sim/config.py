@@ -6,15 +6,15 @@ from dataclasses import dataclass
 # ------------------------------------------------------------
 @dataclass(frozen=False)  # mutable so UI can tweak n_food at runtime
 class WorldConfig:
-    width: float = 250.0
-    height: float = 250.0
+    width: float = 100.0
+    height: float = 100.0
     # fixed-length days: ONLY this ends the day
-    day_steps: int = 1500
+    day_steps: int = 1800
     dt: float = 0.05
     # food
-    n_food: int = 180
+    n_food: int = 150
     # home + bite
-    home_margin: float = 1.5
+    home_margin: float = 1.7
     bite_radius_scale: float = 0.70
 
 # ------------------------------------------------------------
@@ -25,7 +25,7 @@ class EnergyConfig:
     base_energy=190.0
     C_size=0.0035
     C_sense=0.0042
-    C_move=0.0065   # ↓ from 0.0105 (about 30% cheaper to move fast)
+    C_move=0.0055   # ↓ from 0.0105 (about 30% cheaper to move fast)
 
 
 # ------------------------------------------------------------
@@ -34,11 +34,11 @@ class EnergyConfig:
 @dataclass(frozen=True)
 class TraitConfig:
     min_speed: float = 0.2
-    max_speed: float = 10.0
+    max_speed: float = 3.0
     min_size: float = 0.3
-    max_size: float = 8.0
+    max_size: float = 3.0
     min_sense: float = 5.0
-    max_sense: float = 140.0
+    max_sense: float = 30.0
     sense_food_scale: float = 1.25
     sense_pred_scale: float = 1.5
     sense_prey_scale: float = 1.0
@@ -58,7 +58,7 @@ class BehaviorConfig:
 @dataclass(frozen=True)
 class ReproConfig:
     reproduction_offspring: int = 1    # base count (may be overridden per diet rule)
-    mutation_rate: float = 0.10        # tune freely
+    mutation_rate: float = 0.25        # tune freely
     mutation_sd_frac: float = 0.15
 
 # ------------------------------------------------------------
@@ -80,11 +80,11 @@ class RiskConfig:
     speed_weight: float = 0.25
     min_p_kill: float = 0.05
     max_p_kill: float = 0.98
-    injury_on_fail_prob: float = 0.75
+    injury_on_fail_prob: float = 0.80
     injury_days_min: int = 1
     injury_days_max: int = 3
-    injury_speed_mult_lo: float = 0.60
-    injury_speed_mult_hi: float = 0.90
+    injury_speed_mult_lo: float = 0.40
+    injury_speed_mult_hi: float = 0.80
     energy_loss_on_fail: float = 8.0
     fatal_counterattack_prob: float = 0.10    # if prey >= 1.2x size
     injury_energy_leak_per_time: float = 0.003 # per time unit while injured
@@ -94,10 +94,21 @@ class RiskConfig:
 # ------------------------------------------------------------
 @dataclass(frozen=True)
 class PreyAvoidConfig:
-    radius_mult: float = 1.6   # scan radius relative to r_pred
+    radius_mult: float = 1.5   # scan radius relative to r_pred
     min_count:   int   = 2     # number of predators within scan to trigger avoidance
 
+# ------------------------------------------------------------
+# Predator home placement (center of the world)
+# ------------------------------------------------------------
+@dataclass(frozen=True)
+class PredatorHomeConfig:
+    # Predators will have homes near the world center (width/2, height/2)
+    # You can put them on a small ring around the center to avoid perfect overlap.
+    center_ring_radius: float = 30.0   # distance from exact center (world units). Set 0.0 for exact center.
+    ring_jitter: float = 10.0         # random jitter added to the ring radius (uniform ±this amount)
+    spawn_at_home: bool = True        # if True, predators also *spawn* at their home location (center/ring)
 
+PRED_HOME = PredatorHomeConfig()
 # ------------------------------------------------------------
 # HEADLESS SETTINGS
 # ------------------------------------------------------------
@@ -121,3 +132,4 @@ SPECIATION = SpeciationConfig()
 RISK = RiskConfig()
 SIM = SimConfig()
 PREY_AVOID = PreyAvoidConfig()
+PRED_HOME = PredatorHomeConfig()

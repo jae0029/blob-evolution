@@ -26,9 +26,9 @@ def _init_population(n: int, start_id: int = 1):
         pop.append(Creature(
             id=start_id + i,
             species=sp,
-            speed=random.uniform(0.5, 5.0),
-            size=random.uniform(0.5, 3.0),
-            sense=random.uniform(15.0, 50.0),
+            speed=random.uniform(0.75, 1.25),
+            size=random.uniform(0.75, 1.25),
+            sense=random.uniform(8.0, 15.0),
             x=0.0, y=0.0,
             home=(0.0,0.0),
             energy=0.0,
@@ -70,7 +70,7 @@ def run_ui():
     recorder = Recorder(enabled=False, stride_steps=2, world_size=WORLD.width, dt=WORLD.dt, steps_per_day=WORLD.day_steps)
 
     paused = False
-    sim_speed = 20  # steps/frame
+    sim_speed = 10  # steps/frame
     running = True
 
     while running:
@@ -101,7 +101,7 @@ def run_ui():
                 elif e.key == pygame.K_LEFTBRACKET:
                     sim_speed = max(1, sim_speed - 1)
                 elif e.key == pygame.K_RIGHTBRACKET:
-                    sim_speed = min(40, sim_speed + 1)
+                    sim_speed = min(50, sim_speed + 1)
                 elif e.key == pygame.K_1: live.mutate_speed = not live.mutate_speed
                 elif e.key == pygame.K_2: live.mutate_size  = not live.mutate_size
                 elif e.key == pygame.K_3: live.mutate_sense = not live.mutate_sense
@@ -116,8 +116,6 @@ def run_ui():
                 elif e.key == pygame.K_t:
                     renderer.panel_mode = "phylo" if renderer.panel_mode == "traits" else "traits"
                     # --- inside the main event loop ---
-                elif e.key == pygame.K_t:
-                    renderer.panel_mode = "phylo" if renderer.panel_mode == "traits" else "traits"
                 elif e.key == pygame.K_g:
                     renderer.glyph_mode = "quads" if renderer.glyph_mode == "rings" else "rings"
 
