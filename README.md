@@ -17,6 +17,7 @@ python -m evo_sim.main --days 30 --pop 60 --seed 42 --csv runs/summary.csv
 # analysis (create plots of previous program run with ui)
 python analyze_ui_csv.py --overall runs/ui_daily.csv --species runs/ui_species_daily.csv --outdir reports
 
+```
 # Developer Notes
 git status
 git add -A

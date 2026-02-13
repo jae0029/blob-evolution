@@ -18,6 +18,13 @@ import argparse, os, sys, time
 import pandas as pd
 import matplotlib.pyplot as plt
 
+def _latest_session_id(df):
+    # pick the last session_id by file order; or by max day, if you prefer
+    if "session_id" not in df.columns or len(df) == 0:
+        return None
+    # last seen session_id in file order
+    return df["session_id"].dropna().iloc[-1]
+
 def ensure_dir(p: str) -> None:
     os.makedirs(p, exist_ok=True)
 
@@ -359,6 +366,8 @@ def plot_species(df_species: pd.DataFrame, outdir: str, tag: str | None):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--session", type=str, default="",
+                    help="Session ID to analyze; use 'latest' to pick the most recent session automatically.")
     ap.add_argument("--overall", type=str, default="runs/ui_daily.csv",
                     help="Path to overall daily CSV written by the UI")
     ap.add_argument("--species", type=str, default="runs/ui_species_daily.csv",
@@ -374,6 +383,22 @@ def main():
     # Clean/aggregate
     df_overall = clean_overall(df_overall_raw)
     df_species = clean_species(df_species_raw) if df_species_raw is not None else pd.DataFrame()
+
+    # Filter by session if requested
+    if args.session:
+        if "session_id" not in df_overall.columns:
+            print("[WARN] --session was provided but overall CSV has no session_id; ignoring filter.")
+        else:
+            sid = args.session
+            if sid == "latest":
+                sid = _latest_session_id(df_overall)
+            if sid:
+                df_overall = df_overall[df_overall["session_id"] == sid].copy()
+                if df_species is not None and "session_id" in df_species.columns:
+                    df_species = df_species[df_species["session_id"] == sid].copy()
+                print(f"[OK] Filtering analysis to session_id={sid}")
+            else:
+                print("[WARN] Could not resolve latest session_id; analyzing all data.")
 
     # Always export fresh CSVs with timestamp (and optional tag)
     export_csv(df_overall, args.outdir, base="overall_summary", tag=(args.tag or None))
