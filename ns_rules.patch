@@ -1,0 +1,91 @@
+diff --git a/ns_sim_2_0/sim/engine_ns.py b/ns_sim_2_0/sim/engine_ns.py
+index 1111111..2222222 100644
+--- a/ns_sim_2_0/sim/engine_ns.py
++++ b/ns_sim_2_0/sim/engine_ns.py
+@@
+-from __future__ import annotations
+-from typing import List, Tuple
+-import math
+-
+-from evo_sim.sim.config import WORLD, ENERGY
+-from .behaviors_ns import step_behavior, bite_radius, EAT_RATIO
++from __future__ import annotations
++from typing import List, Tuple
++import math
++
++from evo_sim.sim.config import WORLD, ENERGY
++from .behaviors_ns import step_behavior, bite_radius
+@@
+ def _consume_food_if_reached(world, me) -> None:
+     if not me.alive:
+         return
+     r = bite_radius(me.size)
+     f = world.nearest_food_within(me.x, me.y, r)
+     if f is not None and ((f.x - me.x)**2 + (f.y - me.y)**2) <= r*r:
+         me.eaten += 1
+         world.remove_food(f.id)
++        # As soon as they hit 2 foods, commit to going to the nearest edge.
++        if me.eaten >= 2:
++            me.going_home = True
+@@
+-def _consume_prey_if_reached(me, others: List) -> None:
+-    if not me.alive:
+-        return
+-    r = bite_radius(me.size)
+-    target = None
+-    best_d2 = r*r
+-    for o in others:
+-        if (not o.alive) or (o.id == me.id):
+-            continue
+-        if me.size >= EAT_RATIO * o.size:
+-            d2 = (o.x - me.x)**2 + (o.y - me.y)**2
+-            if d2 <= best_d2:
+-                target = o; best_d2 = d2
+-    if target is not None:
+-        if ((target.x - me.x)**2 + (target.y - me.y)**2) <= best_d2:
+-            target.alive = False
+-            me.eaten += 1
++def _consume_prey_if_reached(me, others: List) -> None:
++    """
++    NS rule: no predation. Do nothing.
++    """
++    return
+@@
+ def end_of_day_selection(population: List) -> Tuple[List, List]:
+     survivors: List = []
+     repro: List = []
++
++    def _at_edge(c) -> bool:
++        # Home is any edge: closest distance to an edge within WORLD.home_margin
++        # Edges: x=0, x=W, y=0, y=H
++        d = min(c.x, WORLD.width - c.x, c.y, WORLD.height - c.y)
++        return d <= WORLD.home_margin
+@@
+-    for c in population:
++    for c in population:
+         if not c.alive:
+             continue
+         if c.eaten == 0:
+             c.alive = False
+             continue
+-        # must be home if ate >=1
+-        if c.eaten >= 1 and (not c.at_home(WORLD.home_margin)):
++        # Must reach an edge (home is any edge)
++        if c.eaten >= 1 and (not _at_edge(c)):
+             c.alive = False
+             continue
+         survivors.append(c)
+-        if c.eaten >= 2:
++        if c.eaten >= 2:
+             repro.append(c)
+     return survivors, repro
+@@
+     for step in range(int(WORLD.day_steps)):
+         steps_left = int(WORLD.day_steps) - step
+@@
+-        for me in population:
++        for me in population:
+             if not me.alive:
+                 continue
+             _consume_prey_if_reached(me, population)
+             _consume_food_if_reached(world, me)
