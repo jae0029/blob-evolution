@@ -1,34 +1,91 @@
+diff --git a/ns_sim_2_0/sim/behaviors_ns.py b/ns_sim_2_0/sim/behaviors_ns.py
+index eb7e07d..6216b4b 100644
+--- a/ns_sim_2_0/sim/behaviors_ns.py
++++ b/ns_sim_2_0/sim/behaviors_ns.py
+@@ -6,7 +6,22 @@ import math
+ from evo_sim.sim.config import WORLD, TRAITS, BEHAV
+ 
+ Vec = Tuple[float, float]
+-EAT_RATIO = 1.2
++
++def _nearest_edge_target(x: float, y: float) -> Tuple[float, float, float]:
++    """
++    Return (tx, ty, dist) where (tx,ty) is the closest point on any world edge to (x,y),
++    and dist is the Euclidean distance to that point.
++    """
++    W, H = WORLD.width, WORLD.height
++    candidates = [
++        (0.0, y),       # left
++        (W,   y),       # right
++        (x,   0.0),     # bottom
++        (x,   H),       # top
++    ]
++    tx, ty = min(candidates, key=lambda p: (p[0]-x)**2 + (p[1]-y)**2)
++    dist = math.hypot(tx - x, ty - y)
++    return tx, ty, dist
+ 
+ def _unit(v: Vec) -> Vec:
+     x,y = v
+@@ -26,21 +41,23 @@ def step_behavior(world, me, others: List, dt: float, steps_left: int) -> Vec:
+     eff = me.effective_speed()
+     r_food = me.sense * TRAITS.sense_food_scale
+     r_pred = me.sense * TRAITS.sense_pred_scale
+-    predator = None
+-    best_d2 = r_pred * r_pred
+-    for o in others:
+-        if not o.alive or o.id == me.id:
+-            continue
+-        if o.size >= EAT_RATIO * me.size:
+-            d2 = (o.x - me.x)**2 + (o.y - me.y)**2
+-            if d2 <= best_d2:
+-                predator = o; best_d2 = d2
+-    if predator is not None:
+-        away = (me.x - predator.x, me.y - predator.y)
+-        return _mul(_unit(away), eff)
++    # Always go home after 2 foods
++    if me.eaten >= 2:
++        me.going_home = True
++
++    # After 1 food: if time is tight to reach the nearest edge, go home
++    if me.eaten == 1:
++        tx, ty, dist = _nearest_edge_target(me.x, me.y)
++        time_need = dist / max(eff, 1e-6)     # seconds needed to reach edge
++        time_have = steps_left * dt           # seconds left in day
++        if time_need >= 0.92 * time_have:     # conservative safety margin
++            me.going_home = True
++
++    # If we're going home, steer to the nearest edge point
+     if me.going_home:
+-        to_home = (me.home[0] - me.x, me.home[1] - me.y)
+-        return _mul(_unit(to_home), eff)
++        tx, ty, _ = _nearest_edge_target(me.x, me.y)
++        to_edge = (tx - me.x, ty - me.y)
++        return _mul(_unit(to_edge), eff)
+     f = world.nearest_food_within(me.x, me.y, r_food)
+     if f is not None:
+         to_food = (f.x - me.x, f.y - me.y)
 diff --git a/ns_sim_2_0/sim/engine_ns.py b/ns_sim_2_0/sim/engine_ns.py
-index 1111111..2222222 100644
+index e68eee6..067ea16 100644
 --- a/ns_sim_2_0/sim/engine_ns.py
 +++ b/ns_sim_2_0/sim/engine_ns.py
-@@
--from __future__ import annotations
--from typing import List, Tuple
--import math
--
--from evo_sim.sim.config import WORLD, ENERGY
+@@ -4,7 +4,7 @@ from typing import List, Tuple
+ import math
+ 
+ from evo_sim.sim.config import WORLD, ENERGY
 -from .behaviors_ns import step_behavior, bite_radius, EAT_RATIO
-+from __future__ import annotations
-+from typing import List, Tuple
-+import math
-+
-+from evo_sim.sim.config import WORLD, ENERGY
 +from .behaviors_ns import step_behavior, bite_radius
-@@
- def _consume_food_if_reached(world, me) -> None:
-     if not me.alive:
-         return
-     r = bite_radius(me.size)
-     f = world.nearest_food_within(me.x, me.y, r)
+ 
+ 
+ def _clamp_speed(vx: float, vy: float, vmax: float) -> Tuple[float, float]:
+@@ -33,24 +33,15 @@ def _consume_food_if_reached(world, me) -> None:
      if f is not None and ((f.x - me.x)**2 + (f.y - me.y)**2) <= r*r:
          me.eaten += 1
          world.remove_food(f.id)
-+        # As soon as they hit 2 foods, commit to going to the nearest edge.
++        # After 2 foods, head to edge
 +        if me.eaten >= 2:
 +            me.going_home = True
-@@
--def _consume_prey_if_reached(me, others: List) -> None:
+ 
+ def _consume_prey_if_reached(me, others: List) -> None:
 -    if not me.alive:
 -        return
 -    r = bite_radius(me.size)
@@ -45,47 +102,31 @@ index 1111111..2222222 100644
 -        if ((target.x - me.x)**2 + (target.y - me.y)**2) <= best_d2:
 -            target.alive = False
 -            me.eaten += 1
-+def _consume_prey_if_reached(me, others: List) -> None:
 +    """
 +    NS rule: no predation. Do nothing.
 +    """
 +    return
-@@
+ 
+ def simulate_day(world, population: List) -> None:
+     world.spawn_food_uniform(int(WORLD.n_food))
+@@ -82,6 +73,10 @@ def simulate_day(world, population: List) -> None:
+             _consume_food_if_reached(world, me)
+ 
  def end_of_day_selection(population: List) -> Tuple[List, List]:
-     survivors: List = []
-     repro: List = []
-+
 +    def _at_edge(c) -> bool:
-+        # Home is any edge: closest distance to an edge within WORLD.home_margin
-+        # Edges: x=0, x=W, y=0, y=H
++        # Distance to nearest edge (x=0, x=W, y=0, y=H)
 +        d = min(c.x, WORLD.width - c.x, c.y, WORLD.height - c.y)
 +        return d <= WORLD.home_margin
-@@
--    for c in population:
-+    for c in population:
-         if not c.alive:
-             continue
+     survivors: List = []
+     repro: List = []
+     for c in population:
+@@ -90,7 +85,8 @@ def end_of_day_selection(population: List) -> Tuple[List, List]:
          if c.eaten == 0:
              c.alive = False
              continue
--        # must be home if ate >=1
 -        if c.eaten >= 1 and (not c.at_home(WORLD.home_margin)):
-+        # Must reach an edge (home is any edge)
++        # new (any-edge check)
 +        if c.eaten >= 1 and (not _at_edge(c)):
              c.alive = False
              continue
          survivors.append(c)
--        if c.eaten >= 2:
-+        if c.eaten >= 2:
-             repro.append(c)
-     return survivors, repro
-@@
-     for step in range(int(WORLD.day_steps)):
-         steps_left = int(WORLD.day_steps) - step
-@@
--        for me in population:
-+        for me in population:
-             if not me.alive:
-                 continue
-             _consume_prey_if_reached(me, population)
-             _consume_food_if_reached(world, me)
