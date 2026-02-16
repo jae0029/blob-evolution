@@ -13,6 +13,10 @@ DONE_COLOR   = (240,160,60)
 DEAD_COLOR   = (220,80,80)
 PANEL_BG     = (10,12,16)
 
+# Top bar colors
+TOPBAR_BG    = (24,26,32)
+TOPBAR_LINE  = (54,58,66)
+
 # Diet ring colors
 DIET_COLORS = {
     "carnivore": (220, 60, 60),   # red
@@ -27,6 +31,19 @@ BRAVE_LOW, BRAVE_HIGH         = (130,130,130),  (90, 220, 120)   # gray -> green
 
 INJURY_COLOR  = (255, 140, 0)  # orange overlay for injury
 FOOD_DOT_COLOR= (240, 240, 240)
+
+# ---------- Layout knobs (tweak here) ----------
+DRAW_TOPBAR      = True     # set False if you draw a header bar in app.py
+TOPBAR_HEIGHT    = 100       # header bar height
+HUD_PAD_X        = 12       # HUD left padding
+HUD_PAD_Y        = 10       # HUD top padding
+
+PANEL_PADDING    = 12       # inner padding inside the right panel
+TITLE_GAP        = 6        # space between title and subtitle
+SECTION_GAP      = 10       # space between stacked sections
+PLOT_SIDE_PAD    = 36       # extra left/right room around the plot box (for axes labels)
+PLOT_TOP_PAD     = 8        # space above the plotted points box (inside content)
+PLOT_BOTTOM_PAD  = 36       # room for x-axis labels/title under the plot box
 
 def _clamp01(x: float) -> float:
     return 0.0 if x < 0 else (1.0 if x > 1.0 else x)
@@ -50,23 +67,39 @@ class Renderer:
     def __init__(self, screen, world_rect: pygame.Rect, panel_rect: pygame.Rect, font_name="Menlo"):
         self.screen = screen
 
-        # --- EXTRA SPACE: lift the world down a bit so the HUD banner has headroom ---
-        # (No change needed in app.py; we offset here.)
-        banner_pad = 24
-        self.world_rect = pygame.Rect(world_rect.x, world_rect.y + banner_pad,
-                                      world_rect.w, max(0, world_rect.h - banner_pad))
+        # Render-time layout
+        self.topbar_height = TOPBAR_HEIGHT
 
-        # Keep panel rect as-is; we'll enlarge content area *inside* the panel.
-        self.panel_rect = panel_rect
+        # Store rects; apply top bar offset to world region
+        self.panel_rect_outer = panel_rect
+        self.panel_content = self.panel_rect_outer.inflate(-2*PANEL_PADDING, -2*PANEL_PADDING)
+
+        self.world_rect = pygame.Rect(
+            world_rect.x,
+            world_rect.y + self.topbar_height,
+            world_rect.w,
+            max(0, world_rect.h - self.topbar_height)
+        )
 
         self.font = pygame.font.SysFont(font_name, 14)
         self.bigfont = pygame.font.SysFont(font_name, 18, bold=True)
 
-        # Right-panel mode (existing)
+        # Modes
         self.panel_mode = "traits"  # "traits" | "phylo"
+        self.glyph_mode = "rings"   # "rings" | "quads"
+        self.show_legend = True     # toggled by 'L'
 
-        # NEW: blob glyph mode for world rendering ("rings" | "quads")
-        self.glyph_mode = "rings"
+    # Public API: call when window resizes
+    def resize(self, world_rect: pygame.Rect, panel_rect: pygame.Rect):
+        """Update layout rects after a window resize."""
+        self.panel_rect_outer = panel_rect
+        self.panel_content = self.panel_rect_outer.inflate(-2*PANEL_PADDING, -2*PANEL_PADDING)
+        self.world_rect = pygame.Rect(
+            world_rect.x,
+            world_rect.y + self.topbar_height,
+            world_rect.w,
+            max(0, world_rect.h - self.topbar_height)
+        )
 
     # ---------- coordinate helpers ----------
     def world_to_screen(self, x, y):
@@ -74,6 +107,17 @@ class Renderer:
         sx = rx + (x / WORLD.width) * rw
         sy = ry + (y / WORLD.height) * rh
         return int(sx), int(sy)
+
+    # ---------- top bar ----------
+    def _draw_topbar(self):
+        """Draw a subtle header bar behind HUD text."""
+        if not DRAW_TOPBAR:
+            return
+        scr = self.screen.get_rect()
+        bar = pygame.Rect(0, 0, scr.w, self.topbar_height)
+        pygame.draw.rect(self.screen, TOPBAR_BG, bar)
+        # bottom divider line
+        pygame.draw.line(self.screen, TOPBAR_LINE, (0, self.topbar_height), (scr.w, self.topbar_height), 1)
 
     # ---------- grid ----------
     def _draw_grid(self, spacing=20.0):
@@ -190,7 +234,6 @@ class Renderer:
     # ---------- legend box ----------
     def _draw_legend(self):
         """Compact legend in the lower-left of the world region."""
-        # Position near bottom-left of the world rect
         pad = 8
         w, h = 230, 138
         lx = self.world_rect.x + pad
@@ -228,6 +271,9 @@ class Renderer:
 
     # ---------- world ----------
     def draw_world(self, live):
+        # Draw top bar first so HUD sits on top of it later.
+        self._draw_topbar()
+
         self._draw_grid()
         # food
         for fx, fy in live.food_positions():
@@ -238,10 +284,11 @@ class Renderer:
         # creatures
         for c in live.population:
             self._draw_blob(c)
-        # NEW: legend
-        self._draw_legend()
+        # legend (toggleable)
+        if self.show_legend:
+            self._draw_legend()
 
-    # ---------- Trait panel (unchanged content; expanded box area) ----------
+    # ---------- Trait panel ----------
     def _project(self, sp, sz, se, mins, maxs):
         smin,zmin,emin = mins; smax,zmax,emax = maxs
         x = (sp - smin)/(smax-smin+1e-9) - 0.5
@@ -258,14 +305,32 @@ class Renderer:
         return x2*persp, y3*persp
 
     def draw_trait_panel(self, live):
-        pr = self.panel_rect
+        pr = self.panel_rect_outer
+        pc = self.panel_content  # padded inner content area
+
+        # Panel chrome
         pygame.draw.rect(self.screen, PANEL_BG, pr)
         pygame.draw.rect(self.screen, (70,75,85), pr, 2)
-        self.screen.blit(self.bigfont.render("Trait Cloud (Speed, Size, Sense)", True, (220,220,230)), (pr.x+10, pr.y+10))
-        self.screen.blit(self.font.render("Color = Species | x~Speed, y~Size (proj.)", True, (160,165,175)), (pr.x+10, pr.y+36))
 
-        # EXPANDED: slightly larger inner plotting area (less margin)
-        box = pygame.Rect(pr.x+46, pr.y+54, pr.w - 58, pr.h - 160)
+        # Title & subtitle inside padded content
+        title_surf = self.bigfont.render("Trait Cloud (Speed, Size, Sense)", True, (220,220,230))
+        subtitle_surf = self.font.render("Color = Species | x~Speed, y~Size (proj.)", True, (160,165,175))
+
+        title_pos = (pc.x, pc.y)
+        subtitle_pos = (pc.x, pc.y + title_surf.get_height() + TITLE_GAP)
+        self.screen.blit(title_surf, title_pos)
+        self.screen.blit(subtitle_surf, subtitle_pos)
+
+        # Plot area below subtitle with extra inner padding for axes labels
+        y0 = subtitle_pos[1] + subtitle_surf.get_height() + SECTION_GAP
+        plot_left   = pc.x + PLOT_SIDE_PAD
+        plot_top    = y0 + PLOT_TOP_PAD
+        plot_right  = pc.right - PLOT_SIDE_PAD
+        # Make the plot box height adaptive but leave room for legend and x-labels
+        max_plot_h = pc.bottom - plot_top - (PLOT_BOTTOM_PAD + SECTION_GAP + 100)  # 100px min for legend
+        plot_h = max(140, int(min(max_plot_h, pc.h * 0.55)))
+        box = pygame.Rect(plot_left, plot_top, max(80, plot_right - plot_left), plot_h)
+
         pygame.draw.rect(self.screen, (25,30,36), box)
 
         pop = live.population
@@ -288,8 +353,9 @@ class Renderer:
         # axes
         self._draw_trait_axes(box, mins, maxs)
 
-        # legend (species counts) under plot
-        legend = pygame.Rect(pr.x+12, box.bottom+8, pr.w-24, pr.h - (box.bottom - pr.y) - 20)
+        # legend (species counts) under plot in remaining content area
+        legend_top = box.bottom + SECTION_GAP
+        legend = pygame.Rect(pc.x, legend_top, pc.w, max(60, pc.bottom - legend_top))
         pygame.draw.rect(self.screen, (25,30,36), legend)
         counts = Counter((c.species.name, c.species.diet.lower()) for c in pop)
         x, y = legend.x + 10, legend.y + 8
@@ -328,20 +394,23 @@ class Renderer:
         y_title = self.font.render("Size",  True, (220,220,230))
         self.screen.blit(x_title, (left + (box.w - x_title.get_width())//2, bottom + 22))
         y_surf = pygame.transform.rotate(y_title, 90)
-        # NEW (destination is a single (x, y) tuple)
+        # destination as a single (x, y) tuple
         self.screen.blit(
             y_surf,
             (left - y_surf.get_width() - 12, top + (box.h - y_surf.get_height()) // 2)
         )
 
-    # ---------- Phylogeny panel (if you implemented earlier, keep your version) ----------
+    # ---------- Phylogeny panel ----------
     def draw_phylogeny_panel(self, lineage, current_day: int):
-        pr = self.panel_rect
+        pr = self.panel_rect_outer
+        pc = self.panel_content
         pygame.draw.rect(self.screen, PANEL_BG, pr)
         pygame.draw.rect(self.screen, (70,75,85), pr, 2)
-        self.screen.blit(self.bigfont.render("Phylogenetic Tree (Species)", True, (220,220,230)), (pr.x+10, pr.y+10))
-        self.screen.blit(self.font.render("Y = time (days), X = branch layout | press T to toggle", True, (160,165,175)), (pr.x+10, pr.y+36))
-        # (Your existing phylogeny drawing code here...)
+        self.screen.blit(self.bigfont.render("Phylogenetic Tree (Species)", True, (220,220,230)), (pc.x, pc.y))
+        self.screen.blit(self.font.render("Y = time (days), X = branch layout | press T to toggle",
+                                          True, (160,165,175)),
+                         (pc.x, pc.y + 24 + TITLE_GAP))
+        # (Your existing phylogeny drawing code here; use pc as the padded content area)
 
     def draw_panel(self, live, lineage):
         if self.panel_mode == "traits":
@@ -354,13 +423,14 @@ class Renderer:
             f"Day: {live.day} Step: {live.step_in_day}/{int(WORLD.day_steps)}",
             f"Population: {len(live.population)}",
             f"Food/day: {int(WORLD.n_food)}  Sim speed: {sim_speed} steps/frame  {'PAUSED' if paused else ''}  {'REC ON' if rec_enabled else 'REC OFF'}",
-            f"Mutations: speed[{mutate_flags[0]}] size[{mutate_flags[1]}] sense[{mutate_flags[2]}]   Panel: {self.panel_mode} (T)   Glyph: {self.glyph_mode} (G)",
+            f"Mutations: speed[{mutate_flags[0]}] size[{mutate_flags[1]}] sense[{mutate_flags[2]}]   Panel: {self.panel_mode} (T)   Glyph: {self.glyph_mode} (G)   Legend: {'ON' if self.show_legend else 'OFF'} (L)",
             "Controls:",
             " Space Pause   R Reset   +/- Food   [ ] SimSpeed   1/2/3 toggle mut   M toggle all",
-            " V toggle record   C clear record   S save NPZ   T toggle panel (Traits/Phylo)   G toggle glyph (rings/quads)   Esc quit",
+            " V toggle record   C clear record   S save NPZ   T toggle panel (Traits/Phylo)   G toggle glyph (rings/quads)   L toggle legend   Esc quit",
         ]
-        y = 8
+        x = HUD_PAD_X
+        y = HUD_PAD_Y
         for i, s in enumerate(lines):
             col = (225,225,235) if i < 3 else (170,175,185)
-            self.screen.blit(self.font.render(s, True, col), (10, y))
+            self.screen.blit(self.font.render(s, True, col), (x, y))
             y += 18

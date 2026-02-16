@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 import pygame
 from evo_sim.ui.renderer import Renderer
@@ -9,21 +8,55 @@ from ns_sim_2_0.sim.live_ns import LiveSimNS
 
 WIDTH, HEIGHT = 1200, 720
 
+# ------------------------------
+# UI layout metrics (tweak these)
+# ------------------------------
+OUTER_MARGIN = 16        # space from window edges
+# TOPBAR_HEIGHT = 60       # reserved header/HUD area height
+BOTTOM_MARGIN = 24       # bottom breathing room
+PANEL_GUTTER = 12        # gap between world and side panel
+PANEL_WIDTH_FRAC = 0.33  # right panel width fraction of total
+PANEL_PADDING = 12       # inner padding inside the panel for plots/text (must match renderer's PANEL_PADDING for a consistent look)
+
+
+def _compute_layout(w: int, h: int):
+    """Return (world_rect, panel_outer_rect) using current window size."""
+    panel_w = int(w * PANEL_WIDTH_FRAC)
+
+    world_rect = pygame.Rect(
+        OUTER_MARGIN,
+        OUTER_MARGIN,  # renderer will push this down by its own TOPBAR_HEIGHT
+        w - (OUTER_MARGIN * 2) - panel_w - PANEL_GUTTER,
+        h - OUTER_MARGIN - BOTTOM_MARGIN
+    )
+
+    panel_outer = pygame.Rect(
+        w - OUTER_MARGIN - panel_w,
+        OUTER_MARGIN,
+        panel_w,
+        h - OUTER_MARGIN - BOTTOM_MARGIN
+    )
+
+    # NOTE: pass the OUTER (not padded) panel rect to Renderer; it applies inner padding.
+    return world_rect, panel_outer
+
+
 def run_ui():
     pygame.init()
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
     pygame.display.set_caption("Natural Selection UI")
     clock = pygame.time.Clock()
 
-    panel_w = int(WIDTH * 0.33)
-    world_rect = pygame.Rect(8, 56, WIDTH - panel_w - 16, HEIGHT - 64)
-    panel_rect = pygame.Rect(WIDTH - panel_w - 8, 56, panel_w, HEIGHT - 64)
+    world_rect, panel_outer = _compute_layout(WIDTH, HEIGHT)
+    renderer = Renderer(screen, world_rect, panel_outer)
 
-    renderer = Renderer(screen, world_rect, panel_rect)
-
-    sp = Species(1, "NS", (120,160,240), aggression=0.0, bravery=0.0, metabolism=1.0, diet="omnivore")
-    init_pop = [Creature(id=i+1, species=sp, speed=2.2, size=1.0, sense=30.0,
-                         x=0.0,y=0.0, home=(0.0,0.0), energy=0.0) for i in range(40)]
+    # ---- Sim setup (unchanged) ----
+    sp = Species(1, "NS", (120, 160, 240), aggression=0.0, bravery=0.0, metabolism=1.0, diet="omnivore")
+    init_pop = [
+        Creature(id=i + 1, species=sp, speed=2.2, size=1.0, sense=30.0,
+                 x=0.0, y=0.0, home=(0.0, 0.0), energy=0.0)
+        for i in range(40)
+    ]
 
     live = LiveSimNS(init_pop, seed=SIM.seed)
 
@@ -31,6 +64,7 @@ def run_ui():
                             species_path="runs_ns/ui_species_daily.csv",
                             enable_species=True)
 
+    
     sim_speed = 1
     paused = False
     rec_enabled = False
@@ -40,15 +74,31 @@ def run_ui():
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
                 running = False
+
+            # --- Window resize handling (both events for cross-platform robustness) ---
+            elif e.type == pygame.VIDEORESIZE or e.type == pygame.WINDOWRESIZED:
+                # Recreate the screen surface to new size (ensures correct blit scaling on some platforms)
+                screen = pygame.display.set_mode((e.w, e.h), pygame.RESIZABLE)
+                # Recompute layout and notify renderer
+                world_rect, panel_outer = _compute_layout(e.w, e.h)
+                renderer.screen = screen
+                renderer.resize(world_rect, panel_outer)
+
             elif e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_ESCAPE:
                     running = False
                 elif e.key == pygame.K_SPACE:
                     paused = not paused
+                elif e.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
+                    WORLD.n_food = min(1000, int(WORLD.n_food) + 5)
+                elif e.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                    WORLD.n_food = max(0, int(WORLD.n_food) - 5)
                 elif e.key == pygame.K_t:
                     renderer.panel_mode = "phylo" if renderer.panel_mode == "traits" else "traits"
                 elif e.key == pygame.K_g:
                     renderer.glyph_mode = "quads" if renderer.glyph_mode == "rings" else "rings"
+                elif e.key == pygame.K_l:  # <-- NEW: toggle legend
+                    renderer.show_legend = not renderer.show_legend
                 elif e.key == pygame.K_RIGHT or e.key == pygame.K_RIGHTBRACKET:
                     sim_speed = min(50, sim_speed + 1)
                 elif e.key == pygame.K_LEFT or e.key == pygame.K_LEFTBRACKET:
@@ -70,7 +120,10 @@ def run_ui():
         screen.fill((14,16,20))
         renderer.draw_world(live)
         renderer.draw_panel(live, lineage=None)
-        renderer.draw_hud(live, sim_speed, paused, rec_enabled, (live.mutate_speed, live.mutate_size, live.mutate_sense))
+        renderer.draw_hud(
+            live, sim_speed, paused, rec_enabled,
+            (live.mutate_speed, live.mutate_size, live.mutate_sense)
+        )
         pygame.display.flip()
         clock.tick(60)
 

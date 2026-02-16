@@ -29,4 +29,4 @@ git push
 
 
 # 
-python choose_sim.py
+python3 choose_sim.py
