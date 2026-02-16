@@ -34,7 +34,7 @@ FOOD_DOT_COLOR= (240, 240, 240)
 
 # ---------- Layout knobs (tweak here) ----------
 DRAW_TOPBAR      = True     # set False if you draw a header bar in app.py
-TOPBAR_HEIGHT    = 100       # header bar height
+TOPBAR_HEIGHT    = 140       # header bar height
 HUD_PAD_X        = 12       # HUD left padding
 HUD_PAD_Y        = 10       # HUD top padding
 
@@ -44,6 +44,7 @@ SECTION_GAP      = 10       # space between stacked sections
 PLOT_SIDE_PAD    = 36       # extra left/right room around the plot box (for axes labels)
 PLOT_TOP_PAD     = 8        # space above the plotted points box (inside content)
 PLOT_BOTTOM_PAD  = 36       # room for x-axis labels/title under the plot box
+LEGEND_TOP_PAD = 18
 
 def _clamp01(x: float) -> float:
     return 0.0 if x < 0 else (1.0 if x > 1.0 else x)
@@ -74,15 +75,10 @@ class Renderer:
         self.panel_rect_outer = panel_rect
         self.panel_content = self.panel_rect_outer.inflate(-2*PANEL_PADDING, -2*PANEL_PADDING)
 
-        self.world_rect = pygame.Rect(
-            world_rect.x,
-            world_rect.y + self.topbar_height,
-            world_rect.w,
-            max(0, world_rect.h - self.topbar_height)
-        )
+        self.world_rect = world_rect.copy()
 
-        self.font = pygame.font.SysFont(font_name, 14)
-        self.bigfont = pygame.font.SysFont(font_name, 18, bold=True)
+        self.font = pygame.font.SysFont(font_name, 12)
+        self.bigfont = pygame.font.SysFont(font_name, 16, bold=True)
 
         # Modes
         self.panel_mode = "traits"  # "traits" | "phylo"
@@ -94,12 +90,7 @@ class Renderer:
         """Update layout rects after a window resize."""
         self.panel_rect_outer = panel_rect
         self.panel_content = self.panel_rect_outer.inflate(-2*PANEL_PADDING, -2*PANEL_PADDING)
-        self.world_rect = pygame.Rect(
-            world_rect.x,
-            world_rect.y + self.topbar_height,
-            world_rect.w,
-            max(0, world_rect.h - self.topbar_height)
-        )
+        self.world_rect = world_rect.copy()
 
     # ---------- coordinate helpers ----------
     def world_to_screen(self, x, y):
@@ -235,7 +226,9 @@ class Renderer:
     def _draw_legend(self):
         """Compact legend in the lower-left of the world region."""
         pad = 8
-        w, h = 230, 138
+        lines = 7  # diet rows + status rows + glyph line
+        h = 40 + lines * 18
+        w = 250
         lx = self.world_rect.x + pad
         ly = self.world_rect.bottom - h - pad
 
@@ -327,7 +320,7 @@ class Renderer:
         plot_top    = y0 + PLOT_TOP_PAD
         plot_right  = pc.right - PLOT_SIDE_PAD
         # Make the plot box height adaptive but leave room for legend and x-labels
-        max_plot_h = pc.bottom - plot_top - (PLOT_BOTTOM_PAD + SECTION_GAP + 100)  # 100px min for legend
+        max_plot_h = pc.bottom - plot_top - (PLOT_BOTTOM_PAD + SECTION_GAP + 120)
         plot_h = max(140, int(min(max_plot_h, pc.h * 0.55)))
         box = pygame.Rect(plot_left, plot_top, max(80, plot_right - plot_left), plot_h)
 
@@ -353,16 +346,55 @@ class Renderer:
         # axes
         self._draw_trait_axes(box, mins, maxs)
 
-        # legend (species counts) under plot in remaining content area
-        legend_top = box.bottom + SECTION_GAP
-        legend = pygame.Rect(pc.x, legend_top, pc.w, max(60, pc.bottom - legend_top))
-        pygame.draw.rect(self.screen, (25,30,36), legend)
+        # ---- Dynamic species legend ----
         counts = Counter((c.species.name, c.species.diet.lower()) for c in pop)
-        x, y = legend.x + 10, legend.y + 8
-        for (name, diet), cnt in sorted(counts.items(), key=lambda kv: kv[0][0]):
-            pygame.draw.rect(self.screen, DIET_COLORS.get(diet,(160,160,160)), (x, y+4, 16, 10))
-            self.screen.blit(self.font.render(f"{name} ({diet}): {cnt}", True, (190,195,205)), (x+24, y))
-            y += 18
+
+        # Sort species alphabetically
+        sorted_items = sorted(counts.items(), key=lambda kv: kv[0][0])
+
+        MAX_LINES = 5
+        display_items = sorted_items[:MAX_LINES]
+        n_lines = len(display_items)
+
+        ROW_HEIGHT = 18
+        INNER_PAD = 8
+        TITLE_SPACE = 4
+
+        legend_height = INNER_PAD * 2 + n_lines * ROW_HEIGHT
+        legend_top = box.bottom + SECTION_GAP + 12
+
+        # Ensure legend doesn't overflow panel
+        available_height = pc.bottom - legend_top
+        legend_height = min(legend_height, available_height)
+
+        legend = pygame.Rect(pc.x, legend_top, pc.w, legend_height)
+        pygame.draw.rect(self.screen, (25,30,36), legend)
+        pygame.draw.rect(self.screen, (60,65,75), legend, 1)
+
+        x = legend.x + 10
+        y = legend.y + INNER_PAD
+
+        for (name, diet), cnt in display_items:
+            pygame.draw.rect(self.screen,
+                            DIET_COLORS.get(diet,(160,160,160)),
+                            (x, y+4, 16, 10))
+
+            label = f"{name} ({diet}): {cnt}"
+            self.screen.blit(
+                self.font.render(label, True, (190,195,205)),
+                (x + 24, y)
+            )
+
+            y += ROW_HEIGHT
+
+        if len(sorted_items) > MAX_LINES:
+            more_label = f"... +{len(sorted_items) - MAX_LINES} more"
+            self.screen.blit(
+                self.font.render(more_label, True, (140,145,155)),
+                (x, y)
+            )
+
+
 
     def _draw_trait_axes(self, box: pygame.Rect, mins, maxs):
         axis_color = (160,165,175)
@@ -389,16 +421,16 @@ class Renderer:
             pygame.draw.line(self.screen, axis_color, (left, ypix), (left+6, ypix), 1)
             txt = self.font.render(label, True, axis_color)
             self.screen.blit(txt, (left - txt.get_width() - 6, ypix - txt.get_height()//2))
-        # axis titles
-        x_title = self.font.render("Speed", True, (220,220,230))
-        y_title = self.font.render("Size",  True, (220,220,230))
-        self.screen.blit(x_title, (left + (box.w - x_title.get_width())//2, bottom + 22))
-        y_surf = pygame.transform.rotate(y_title, 90)
-        # destination as a single (x, y) tuple
-        self.screen.blit(
-            y_surf,
-            (left - y_surf.get_width() - 12, top + (box.h - y_surf.get_height()) // 2)
-        )
+        # # axis titles
+        # x_title = self.font.render("Speed", True, (220,220,230))
+        # y_title = self.font.render("Size",  True, (220,220,230))
+        # self.screen.blit(x_title, (left + (box.w - x_title.get_width())//2, bottom + 22))
+        # y_surf = pygame.transform.rotate(y_title, 90)
+        # # destination as a single (x, y) tuple
+        # self.screen.blit(
+        #     y_surf,
+        #     (left - y_surf.get_width() - 12, top + (box.h - y_surf.get_height()) // 2)
+        # )
 
     # ---------- Phylogeny panel ----------
     def draw_phylogeny_panel(self, lineage, current_day: int):
@@ -425,8 +457,8 @@ class Renderer:
             f"Food/day: {int(WORLD.n_food)}  Sim speed: {sim_speed} steps/frame  {'PAUSED' if paused else ''}  {'REC ON' if rec_enabled else 'REC OFF'}",
             f"Mutations: speed[{mutate_flags[0]}] size[{mutate_flags[1]}] sense[{mutate_flags[2]}]   Panel: {self.panel_mode} (T)   Glyph: {self.glyph_mode} (G)   Legend: {'ON' if self.show_legend else 'OFF'} (L)",
             "Controls:",
-            " Space Pause   R Reset   +/- Food   [ ] SimSpeed   1/2/3 toggle mut   M toggle all",
-            " V toggle record   C clear record   S save NPZ   T toggle panel (Traits/Phylo)   G toggle glyph (rings/quads)   L toggle legend   Esc quit",
+            " Space Pause   R Reset   +/- Food   [ ] SimSpeed   1/2/3 toggle mut   M toggle all   V toggle record   C clear record",
+            " S save NPZ   T toggle panel (Traits/Phylo)   G toggle glyph (rings/quads)   L toggle legend   Esc quit",
         ]
         x = HUD_PAD_X
         y = HUD_PAD_Y
@@ -434,3 +466,6 @@ class Renderer:
             col = (225,225,235) if i < 3 else (170,175,185)
             self.screen.blit(self.font.render(s, True, col), (x, y))
             y += 18
+
+
+

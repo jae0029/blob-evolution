@@ -12,7 +12,7 @@ WIDTH, HEIGHT = 1200, 720
 # UI layout metrics (tweak these)
 # ------------------------------
 OUTER_MARGIN = 16        # space from window edges
-# TOPBAR_HEIGHT = 60       # reserved header/HUD area height
+TOPBAR_HEIGHT = 140       # reserved header/HUD area height (must match renderer's topbar_height for a consistent look)
 BOTTOM_MARGIN = 24       # bottom breathing room
 PANEL_GUTTER = 12        # gap between world and side panel
 PANEL_WIDTH_FRAC = 0.33  # right panel width fraction of total
@@ -25,10 +25,12 @@ def _compute_layout(w: int, h: int):
 
     world_rect = pygame.Rect(
         OUTER_MARGIN,
-        OUTER_MARGIN,  # renderer will push this down by its own TOPBAR_HEIGHT
+        OUTER_MARGIN + TOPBAR_HEIGHT,
         w - (OUTER_MARGIN * 2) - panel_w - PANEL_GUTTER,
-        h - OUTER_MARGIN - BOTTOM_MARGIN
+        h - OUTER_MARGIN - BOTTOM_MARGIN - TOPBAR_HEIGHT
     )
+
+
 
     panel_outer = pygame.Rect(
         w - OUTER_MARGIN - panel_w,
@@ -76,13 +78,16 @@ def run_ui():
                 running = False
 
             # --- Window resize handling (both events for cross-platform robustness) ---
-            elif e.type == pygame.VIDEORESIZE or e.type == pygame.WINDOWRESIZED:
-                # Recreate the screen surface to new size (ensures correct blit scaling on some platforms)
-                screen = pygame.display.set_mode((e.w, e.h), pygame.RESIZABLE)
-                # Recompute layout and notify renderer
-                world_rect, panel_outer = _compute_layout(e.w, e.h)
+            elif e.type in (pygame.VIDEORESIZE, pygame.WINDOWRESIZED):
+                # Always query actual window size instead of trusting event
+                w, h = pygame.display.get_window_size()
+
+                screen = pygame.display.set_mode((w, h), pygame.RESIZABLE)
+
+                world_rect, panel_outer = _compute_layout(w, h)
                 renderer.screen = screen
                 renderer.resize(world_rect, panel_outer)
+
 
             elif e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_ESCAPE:
@@ -103,6 +108,22 @@ def run_ui():
                     sim_speed = min(50, sim_speed + 1)
                 elif e.key == pygame.K_LEFT or e.key == pygame.K_LEFTBRACKET:
                     sim_speed = max(1, sim_speed - 1)
+                elif e.key == pygame.K_r:
+                    # recreate species and initial population
+                    sp = Species(1, "NS", (120, 160, 240),
+                                aggression=0.0, bravery=0.0,
+                                metabolism=1.0, diet="omnivore")
+
+                    init_pop = [
+                        Creature(id=i + 1, species=sp,
+                                speed=2.2, size=1.0, sense=30.0,
+                                x=0.0, y=0.0, home=(0.0, 0.0),
+                                energy=0.0)
+                        for i in range(40)
+                    ]
+
+                    live = LiveSimNS(init_pop, seed=SIM.seed)
+
 
         if not paused:
             new_day_started = False
