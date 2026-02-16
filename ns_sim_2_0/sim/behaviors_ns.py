@@ -6,7 +6,22 @@ import math
 from evo_sim.sim.config import WORLD, TRAITS, BEHAV
 
 Vec = Tuple[float, float]
-EAT_RATIO = 1.2
+
+def _nearest_edge_target(x: float, y: float) -> Tuple[float, float, float]:
+    """
+    Return (tx, ty, dist) where (tx,ty) is the closest point on any world edge to (x,y),
+    and dist is the Euclidean distance to that point.
+    """
+    W, H = WORLD.width, WORLD.height
+    candidates = [
+        (0.0, y),       # left
+        (W,   y),       # right
+        (x,   0.0),     # bottom
+        (x,   H),       # top
+    ]
+    tx, ty = min(candidates, key=lambda p: (p[0]-x)**2 + (p[1]-y)**2)
+    dist = math.hypot(tx - x, ty - y)
+    return tx, ty, dist
 
 def _unit(v: Vec) -> Vec:
     x,y = v
@@ -26,21 +41,23 @@ def step_behavior(world, me, others: List, dt: float, steps_left: int) -> Vec:
     eff = me.effective_speed()
     r_food = me.sense * TRAITS.sense_food_scale
     r_pred = me.sense * TRAITS.sense_pred_scale
-    predator = None
-    best_d2 = r_pred * r_pred
-    for o in others:
-        if not o.alive or o.id == me.id:
-            continue
-        if o.size >= EAT_RATIO * me.size:
-            d2 = (o.x - me.x)**2 + (o.y - me.y)**2
-            if d2 <= best_d2:
-                predator = o; best_d2 = d2
-    if predator is not None:
-        away = (me.x - predator.x, me.y - predator.y)
-        return _mul(_unit(away), eff)
+    # Always go home after 2 foods
+    if me.eaten >= 2:
+        me.going_home = True
+
+    # After 1 food: if time is tight to reach the nearest edge, go home
+    if me.eaten == 1:
+        tx, ty, dist = _nearest_edge_target(me.x, me.y)
+        time_need = dist / max(eff, 1e-6)     # seconds needed to reach edge
+        time_have = steps_left * dt           # seconds left in day
+        if time_need >= 0.92 * time_have:     # conservative safety margin
+            me.going_home = True
+
+    # If we're going home, steer to the nearest edge point
     if me.going_home:
-        to_home = (me.home[0] - me.x, me.home[1] - me.y)
-        return _mul(_unit(to_home), eff)
+        tx, ty, _ = _nearest_edge_target(me.x, me.y)
+        to_edge = (tx - me.x, ty - me.y)
+        return _mul(_unit(to_edge), eff)
     f = world.nearest_food_within(me.x, me.y, r_food)
     if f is not None:
         to_food = (f.x - me.x, f.y - me.y)

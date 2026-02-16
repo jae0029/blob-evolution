@@ -4,7 +4,7 @@ from typing import List, Tuple
 import math
 
 from evo_sim.sim.config import WORLD, ENERGY
-from .behaviors_ns import step_behavior, bite_radius, EAT_RATIO
+from .behaviors_ns import step_behavior, bite_radius
 
 
 def _clamp_speed(vx: float, vy: float, vmax: float) -> Tuple[float, float]:
@@ -33,24 +33,15 @@ def _consume_food_if_reached(world, me) -> None:
     if f is not None and ((f.x - me.x)**2 + (f.y - me.y)**2) <= r*r:
         me.eaten += 1
         world.remove_food(f.id)
+        # After 2 foods, head to edge
+        if me.eaten >= 2:
+            me.going_home = True
 
 def _consume_prey_if_reached(me, others: List) -> None:
-    if not me.alive:
-        return
-    r = bite_radius(me.size)
-    target = None
-    best_d2 = r*r
-    for o in others:
-        if (not o.alive) or (o.id == me.id):
-            continue
-        if me.size >= EAT_RATIO * o.size:
-            d2 = (o.x - me.x)**2 + (o.y - me.y)**2
-            if d2 <= best_d2:
-                target = o; best_d2 = d2
-    if target is not None:
-        if ((target.x - me.x)**2 + (target.y - me.y)**2) <= best_d2:
-            target.alive = False
-            me.eaten += 1
+    """
+    NS rule: no predation. Do nothing.
+    """
+    return
 
 def simulate_day(world, population: List) -> None:
     world.spawn_food_uniform(int(WORLD.n_food))
@@ -82,6 +73,10 @@ def simulate_day(world, population: List) -> None:
             _consume_food_if_reached(world, me)
 
 def end_of_day_selection(population: List) -> Tuple[List, List]:
+    def _at_edge(c) -> bool:
+        # Distance to nearest edge (x=0, x=W, y=0, y=H)
+        d = min(c.x, WORLD.width - c.x, c.y, WORLD.height - c.y)
+        return d <= WORLD.home_margin
     survivors: List = []
     repro: List = []
     for c in population:
@@ -90,7 +85,8 @@ def end_of_day_selection(population: List) -> Tuple[List, List]:
         if c.eaten == 0:
             c.alive = False
             continue
-        if c.eaten >= 1 and (not c.at_home(WORLD.home_margin)):
+        # new (any-edge check)
+        if c.eaten >= 1 and (not _at_edge(c)):
             c.alive = False
             continue
         survivors.append(c)
